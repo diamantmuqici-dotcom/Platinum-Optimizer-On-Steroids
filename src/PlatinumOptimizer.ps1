@@ -299,6 +299,76 @@ function Show-POProfilePlan {
     Set-POFooter 'Profile compatibility check complete | nothing applied' 'good'
 }
 
+function Invoke-POAutoGamingOptimize {
+    [CmdletBinding()]
+    param()
+
+    if (-not (Test-POIsAdministrator)) { Start-POElevated; return }
+
+    $started = Get-Date
+    $results = New-Object System.Collections.Generic.List[string]
+    $errors = New-Object System.Collections.Generic.List[string]
+
+    try {
+        Set-POFooter 'Gaming optimization: preparing system...' 'normal'
+        (Get-POControl 'ReadinessTitle').Text = 'Gaming optimization in progress...'
+        (Get-POControl 'ReadinessDetail').Text = 'Applying supported Windows gaming settings. No game files are modified.'
+
+        # Use the existing Gaming plan engine, but remove the manual profile-selection step.
+        try {
+            $snapshot = Get-POSystemSnapshot
+            $plans = @(Get-POPowerPlans)
+            $active = Get-POActivePowerPlanGuid
+            $plan = New-POProfilePlan -ProfileId 'gaming' -SystemSnapshot $snapshot -PowerPlans $plans -ActivePlanGuid $active
+            if ($plan.Change) {
+                $result = Invoke-POProfilePlan -Plan $plan -Confirm:$false -ConfirmAdvanced:$true
+                if ($result.Status -like '*APPLIED*') { [void]$results.Add("Power policy: $($plan.TargetPowerPlanName)") }
+                else { [void]$errors.Add("Power policy: $($result.Message)") }
+            } else { [void]$results.Add('Power policy: already optimal or no compatible performance plan available') }
+        } catch { [void]$errors.Add("Power policy: $($_.Exception.Message)") }
+
+        # Restore the supported Windows TCP/RSS baseline instead of obsolete registry hacks.
+        if (Get-Command netsh.exe -ErrorAction SilentlyContinue) {
+            try {
+                & netsh.exe int tcp set global rss=enabled | Out-Null
+                & netsh.exe int tcp set global autotuninglevel=normal | Out-Null
+                & netsh.exe int tcp set global ecncapability=disabled | Out-Null
+                & netsh.exe int tcp set global timestamps=disabled | Out-Null
+                [void]$results.Add('TCP baseline: RSS enabled, autotuning normal, ECN disabled, timestamps disabled')
+            } catch { [void]$errors.Add("TCP baseline: $($_.Exception.Message)") }
+        }
+
+        try { & ipconfig.exe /flushdns | Out-Null; [void]$results.Add('DNS cache: flushed') }
+        catch { [void]$errors.Add("DNS cache: $($_.Exception.Message)") }
+
+        # Prevent an active physical Ethernet NIC from being power-managed away when supported.
+        try {
+            $ethernetAdapters = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' -and [string]$_.InterfaceDescription -notmatch '(?i)wi-?fi|wireless|802\.11|bluetooth' })
+            if ($ethernetAdapters.Count -gt 0 -and (Get-Command Set-NetAdapterPowerManagement -ErrorAction SilentlyContinue)) {
+                foreach ($adapter in $ethernetAdapters) {
+                    try {
+                        Set-NetAdapterPowerManagement -Name $adapter.Name -AllowComputerToTurnOffDevice Disabled -ErrorAction Stop
+                        [void]$results.Add("Ethernet power management: kept active for $($adapter.Name)")
+                    } catch { [void]$errors.Add("Ethernet $($adapter.Name): $($_.Exception.Message)") }
+                }
+            } elseif ($ethernetAdapters.Count -eq 0) {
+                [void]$results.Add('Ethernet: no active physical Ethernet adapter detected')
+            } else { [void]$results.Add('Ethernet: driver does not expose the Windows power-management control') }
+        } catch { [void]$errors.Add("Ethernet detection: $($_.Exception.Message)") }
+
+        $elapsed = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
+        $summary = "Gaming optimization complete in $elapsed s.$nl$nl" + ($results -join $nl)
+        if ($errors.Count -gt 0) { $summary += "$nl$nlWarnings (non-fatal):$nl" + ($errors -join $nl) }
+        (Get-POControl 'ReadinessTitle').Text = 'Gaming optimization complete'
+        (Get-POControl 'ReadinessDetail').Text = 'The automatic gaming baseline is applied. Actual FPS and game-server ping still depend on hardware, drivers, the game, server and route.'
+        (Get-POControl 'ScoreText').Text = 'Gaming score: NOT SCORED - run a real in-game benchmark to measure FPS/frame time.'
+        Set-POFooter 'Gaming baseline applied · no game files modified' 'good'
+        Show-POMessage -Text $summary -Title 'Platinum Optimizer - Gaming mode' -Icon Information
+    } catch {
+        Set-POFooter "Gaming optimization failed: $($_.Exception.Message)" 'error'
+        Show-POMessage -Text $_.Exception.Message -Title 'Gaming optimization failed' -Icon Error
+    }
+}
 function Invoke-POApplyProfile {
     if (-not $script:poCurrentPlan) { Show-POMessage 'Analyze and preview a profile before applying.'; return }
     if (-not $script:poCurrentPlan.Change) { Show-POMessage 'There is no compatible system change to apply for this profile.'; return }
@@ -580,7 +650,7 @@ foreach ($page in $navButtons) {
 }
 
 (Get-POControl 'RescanButton').Add_Click({ Refresh-POHome })
-(Get-POControl 'OptimizeNowButton').Add_Click({ Set-POPage 'Optimize'; Show-POProfilePlan })
+(Get-POControl 'OptimizeNowButton').Add_Click({ Invoke-POAutoGamingOptimize })
 (Get-POControl 'BaselineButton').Add_Click({ Set-POPage 'Diagnostics'; Capture-POBenchmark -Label 'before' })
 (Get-POControl 'PreviewProfileButton').Add_Click({ Show-POProfilePlan })
 (Get-POControl 'ApplyProfileButton').Add_Click({ Invoke-POApplyProfile })
