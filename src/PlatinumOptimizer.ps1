@@ -132,12 +132,7 @@ function Format-POHardwareReport {
     $lines.Add('  Firmware update: information only; no automatic download or flash.')
     $lines.Add('')
     $lines.Add('SIGNED DRIVER INVENTORY (WINDOWS-PROVIDED METADATA)')
-    $allDriverRows = @(Get-PODriverInventory)
-    $driverStatusRows = @($allDriverRows | Where-Object { $_.DeviceClass -in @('QUERY FAILED', 'NO MATCH') })
-    $driverRows = @($allDriverRows | Where-Object { $_.DeviceClass -notin @('QUERY FAILED', 'NO MATCH') } | Select-Object -First 60)
-    if ($driverStatusRows.Count -gt 0) { foreach ($row in $driverStatusRows) { $lines.Add("  $($row.DeviceClass): $($row.Action)") } }
-    foreach ($driver in $driverRows) { $lines.Add("  [$($driver.DeviceClass)] $($driver.Device) | $($driver.Manufacturer) | version $($driver.DriverVersion) | date $($driver.DriverDate) | signed=$($driver.Signed)") }
-    if ($allDriverRows.Count -gt 60) { $lines.Add('  Display limited to the first 60 matching devices.') }
+    $lines.Add('  Driver inventory: available from the Hardware page; skipped during the initial home scan to keep startup responsive.')
     $lines.Add('')
     $lines.Add('MONITORS')
     foreach ($monitor in @($Snapshot.Monitors)) { $lines.Add("  $($monitor.Manufacturer) $($monitor.Model)  |  active=$($monitor.Active)  |  resolution/refresh/HDR/color depth=$($monitor.Resolution) / $($monitor.RefreshRateHz) / $($monitor.HDR) / $($monitor.ColorDepth)") }
