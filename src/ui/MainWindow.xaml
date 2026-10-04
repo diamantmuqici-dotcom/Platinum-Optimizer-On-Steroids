@@ -1,0 +1,342 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Platinum Optimizer"
+        Height="900" Width="1480" MinHeight="760" MinWidth="1120"
+        WindowStartupLocation="CenterScreen"
+        Background="#0B0F15" Foreground="#E8EDF3"
+        FontFamily="Segoe UI" FontSize="13">
+  <Window.Resources>
+    <SolidColorBrush x:Key="PanelBrush" Color="#121923" />
+    <SolidColorBrush x:Key="PanelAltBrush" Color="#171F2A" />
+    <SolidColorBrush x:Key="LineBrush" Color="#273241" />
+    <SolidColorBrush x:Key="MutedBrush" Color="#92A0B1" />
+    <SolidColorBrush x:Key="PlatinumBrush" Color="#C8D0D9" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#8CA6C1" />
+    <SolidColorBrush x:Key="GoodBrush" Color="#65C89A" />
+    <SolidColorBrush x:Key="WarningBrush" Color="#E4B56E" />
+    <Style TargetType="Button">
+      <Setter Property="Foreground" Value="#E8EDF3" />
+      <Setter Property="Background" Value="#202B39" />
+      <Setter Property="BorderBrush" Value="#334254" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="14,9" />
+      <Setter Property="Margin" Value="0,0,8,0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonBorder" Property="Background" Value="#2A394A" /><Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#607D9B" /></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="ButtonBorder" Property="Background" Value="#33465A" /></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="ButtonBorder" Property="Opacity" Value="0.42" /></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#D3DBE4" />
+      <Setter Property="Foreground" Value="#111822" />
+      <Setter Property="BorderBrush" Value="#E7EDF4" />
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Foreground" Value="#E8EDF3" />
+      <Setter Property="Background" Value="#101721" />
+      <Setter Property="BorderBrush" Value="#334254" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="9,7" />
+      <Setter Property="CaretBrush" Value="#E8EDF3" />
+    </Style>
+    <Style TargetType="ComboBox">
+      <Setter Property="Foreground" Value="#E8EDF3" />
+      <Setter Property="Background" Value="#17212D" />
+      <Setter Property="BorderBrush" Value="#334254" />
+      <Setter Property="Padding" Value="7,5" />
+      <Setter Property="MinWidth" Value="180" />
+    </Style>
+    <Style TargetType="DataGrid">
+      <Setter Property="Background" Value="#101721" />
+      <Setter Property="Foreground" Value="#E8EDF3" />
+      <Setter Property="RowBackground" Value="#121923" />
+      <Setter Property="AlternatingRowBackground" Value="#151E29" />
+      <Setter Property="BorderBrush" Value="#273241" />
+      <Setter Property="GridLinesVisibility" Value="Horizontal" />
+      <Setter Property="HorizontalGridLinesBrush" Value="#273241" />
+      <Setter Property="VerticalGridLinesBrush" Value="#273241" />
+      <Setter Property="HeadersVisibility" Value="Column" />
+      <Setter Property="CanUserAddRows" Value="False" />
+      <Setter Property="IsReadOnly" Value="True" />
+      <Setter Property="AutoGenerateColumns" Value="True" />
+      <Setter Property="Margin" Value="0,12,0,0" />
+    </Style>
+    <Style TargetType="DataGridColumnHeader">
+      <Setter Property="Background" Value="#1B2633" />
+      <Setter Property="Foreground" Value="#C8D0D9" />
+      <Setter Property="BorderBrush" Value="#273241" />
+      <Setter Property="Padding" Value="9,8" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style TargetType="CheckBox">
+      <Setter Property="Foreground" Value="#D8E0E8" />
+      <Setter Property="Margin" Value="0,6,12,6" />
+    </Style>
+    <Style TargetType="ListBoxItem">
+      <Setter Property="Foreground" Value="#D2DBE5" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="Margin" Value="0,1" />
+    </Style>
+  </Window.Resources>
+
+  <Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="248" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+    <Border Grid.Column="0" Background="#0E141D" BorderBrush="#202A36" BorderThickness="0,0,1,0">
+      <DockPanel Margin="18,20,18,16">
+        <StackPanel DockPanel.Dock="Top">
+          <TextBlock Text="PLATINUM" FontSize="23" FontWeight="Bold" Foreground="#E8EDF3" />
+          <TextBlock Text="OPTIMIZER  /  WINDOWS" FontSize="10" FontWeight="SemiBold" Foreground="#8393A5" Margin="1,1,0,22" />
+          <Border Background="#151F2A" BorderBrush="#293748" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,20">
+            <StackPanel>
+              <TextBlock Text="SYSTEM STATUS" FontSize="10" FontWeight="Bold" Foreground="#91A0B1" />
+              <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#E4B56E" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <TextBlock x:Name="StatusText" Text="ANALYZING" FontSize="11" FontWeight="Bold" Foreground="#E4B56E" />
+              </StackPanel>
+              <TextBlock x:Name="AdminStatusText" Text="Limited mode" FontSize="11" Foreground="#91A0B1" Margin="16,5,0,0" />
+            </StackPanel>
+          </Border>
+          <TextBlock Text="WORKSPACE" FontSize="10" FontWeight="Bold" Foreground="#647487" Margin="2,0,0,8" />
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom">
+          <Border Height="1" Background="#273241" Margin="0,8,0,12" />
+          <Button x:Name="NavSettings" Content="⚙   Settings &amp; logs" Tag="Settings" HorizontalContentAlignment="Left" />
+          <TextBlock Text="Local only  ·  No telemetry" FontSize="10" Foreground="#647487" Margin="4,8,0,0" />
+        </StackPanel>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel x:Name="Navigation">
+            <Button x:Name="NavHome" Content="◈   Home" Tag="Home" HorizontalContentAlignment="Left" Background="#253344" />
+            <Button x:Name="NavOptimize" Content="✦   Optimize" Tag="Optimize" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavProfiles" Content="▤   Profiles" Tag="Profiles" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavTweaks" Content="☷   Tweak catalog" Tag="Tweaks" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavGames" Content="⌂   Game library" Tag="Games" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavHardware" Content="▦   Hardware" Tag="Hardware" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavNetwork" Content="⌁   Network" Tag="Network" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavInput" Content="⌖   Input latency" Tag="Input" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavStorage" Content="▣   Storage" Tag="Storage" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavDebloat" Content="▧   App inventory" Tag="Debloat" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavServices" Content="⚙   Services" Tag="Services" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavStartup" Content="◷   Startup" Tag="Startup" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavDiagnostics" Content="⌁   Diagnostics" Tag="Diagnostics" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavRestore" Content="↶   Restore center" Tag="Restore" HorizontalContentAlignment="Left" />
+          </StackPanel>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <Grid Grid.Column="1">
+      <Grid.RowDefinitions><RowDefinition Height="74" /><RowDefinition Height="*" /><RowDefinition Height="32" /></Grid.RowDefinitions>
+      <Border Grid.Row="0" Background="#0D131C" BorderBrush="#202A36" BorderThickness="0,0,0,1">
+        <Grid Margin="30,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock x:Name="PageTitle" Text="Home" FontSize="21" FontWeight="SemiBold" Foreground="#E8EDF3" />
+            <TextBlock x:Name="PageSubtitle" Text="A transparent, reversible view of your Windows gaming system." FontSize="11" Foreground="#8C9BAE" Margin="0,2,0,0" />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+            <TextBlock x:Name="LastScanText" Text="Not scanned" Foreground="#8C9BAE" FontSize="11" VerticalAlignment="Center" Margin="0,0,15,0" />
+            <Button x:Name="RescanButton" Content="Refresh system" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="30,24,30,28">
+          <StackPanel x:Name="HomePanel">
+            <Border Background="#151F2A" BorderBrush="#2B394A" BorderThickness="1" CornerRadius="12" Padding="22" Margin="0,0,0,18">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="SYSTEM READINESS" FontSize="10" FontWeight="Bold" Foreground="#9EADBE" />
+                  <TextBlock x:Name="ReadinessTitle" Text="Profile review required" FontSize="26" FontWeight="SemiBold" Foreground="#E8EDF3" Margin="0,7,0,3" />
+                  <TextBlock x:Name="ReadinessDetail" Text="No changes are applied until you preview and confirm a plan." Foreground="#A9B5C3" TextWrapping="Wrap" MaxWidth="720" />
+                  <TextBlock x:Name="ScoreText" Text="Gaming score: NOT SCORED — no in-game benchmark captured" Foreground="#E4B56E" FontSize="11" FontWeight="SemiBold" Margin="0,13,0,0" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
+                  <Button x:Name="OptimizeNowButton" Content="Review recommended profile  →" Style="{StaticResource PrimaryButton}" Margin="0,0,0,8" />
+                  <Button x:Name="BaselineButton" Content="Capture idle baseline" HorizontalAlignment="Right" />
+                </StackPanel>
+              </Grid>
+            </Border>
+            <TextBlock Text="SYSTEM OVERVIEW" FontSize="10" FontWeight="Bold" Foreground="#8796A8" Margin="2,0,0,10" />
+            <UniformGrid Columns="4" Margin="0,0,0,17">
+              <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,0,10,0"><StackPanel><TextBlock Text="PROCESSOR" FontSize="10" Foreground="#8796A8"/><TextBlock x:Name="HomeCpu" Text="Detecting…" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,9,0,2"/><TextBlock x:Name="HomeCpuDetail" Text="" FontSize="11" Foreground="#92A0B1"/></StackPanel></Border>
+              <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,0,10,0"><StackPanel><TextBlock Text="GRAPHICS" FontSize="10" Foreground="#8796A8"/><TextBlock x:Name="HomeGpu" Text="Detecting…" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,9,0,2"/><TextBlock x:Name="HomeGpuDetail" Text="" FontSize="11" Foreground="#92A0B1"/></StackPanel></Border>
+              <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,0,10,0"><StackPanel><TextBlock Text="MEMORY" FontSize="10" Foreground="#8796A8"/><TextBlock x:Name="HomeRam" Text="Detecting…" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,9,0,2"/><TextBlock x:Name="HomeRamDetail" Text="" FontSize="11" Foreground="#92A0B1"/></StackPanel></Border>
+              <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="16"><StackPanel><TextBlock Text="WINDOWS" FontSize="10" Foreground="#8796A8"/><TextBlock x:Name="HomeWindows" Text="Detecting…" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,9,0,2"/><TextBlock x:Name="HomeWindowsDetail" Text="" FontSize="11" Foreground="#92A0B1"/></StackPanel></Border>
+            </UniformGrid>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="1.1*"/><ColumnDefinition Width="0.9*"/></Grid.ColumnDefinitions>
+              <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="18" Margin="0,0,10,0">
+                <StackPanel><TextBlock Text="MEASURED SYSTEM SAMPLE" FontSize="10" FontWeight="Bold" Foreground="#8796A8"/><TextBlock x:Name="LiveSampleText" Text="Monitoring is off. Enable it only when you want live sampling." TextWrapping="Wrap" Foreground="#B7C2CF" Margin="0,12,0,12"/><StackPanel Orientation="Horizontal"><CheckBox x:Name="MonitorToggle" Content="Enable low-rate monitoring"/><TextBlock Text="CPU and memory only · no background capture" FontSize="10" Foreground="#8291A3" VerticalAlignment="Center"/></StackPanel></StackPanel>
+              </Border>
+              <Border Grid.Column="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="18">
+                <StackPanel><TextBlock Text="SECURITY — OBSERVED, NEVER OVERRIDDEN" FontSize="10" FontWeight="Bold" Foreground="#8796A8"/><TextBlock x:Name="HomeSecurityText" Text="Status not yet queried." TextWrapping="Wrap" Foreground="#B7C2CF" Margin="0,12,0,5"/><TextBlock Text="Windows Update · Store · Defender · Firewall · UAC are not disabled by Platinum Optimizer." TextWrapping="Wrap" FontSize="11" Foreground="#65C89A"/></StackPanel>
+              </Border>
+            </Grid>
+          </StackPanel>
+
+          <StackPanel x:Name="OptimizePanel" Visibility="Collapsed">
+            <TextBlock Text="Preview first. Apply only the action you understand." FontSize="16" FontWeight="SemiBold" Margin="0,0,0,5" />
+            <TextBlock Text="Profiles never mass-apply tweaks. They can only select an already-installed Windows power plan after compatibility checks." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,0,0,18" />
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
+              <StackPanel>
+                <TextBlock Text="PROFILE" FontSize="10" FontWeight="Bold" Foreground="#8796A8" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,14"><ComboBox x:Name="ProfileCombo" Width="260"/><Button x:Name="PreviewProfileButton" Content="Analyze &amp; preview" Style="{StaticResource PrimaryButton}"/></StackPanel>
+                <Border Background="#0F151E" BorderBrush="#273241" BorderThickness="1" CornerRadius="8" Padding="16">
+                  <StackPanel>
+                    <TextBlock x:Name="PreviewHeadline" Text="Select a profile to start a compatibility check." FontSize="15" FontWeight="SemiBold" />
+                    <TextBlock x:Name="PreviewSummary" Text="No system changes have been made." Foreground="#A9B5C3" TextWrapping="Wrap" Margin="0,6,0,10" />
+                    <TextBlock Text="PLANNED CHANGE" FontSize="10" FontWeight="Bold" Foreground="#8796A8" Margin="0,4,0,5" />
+                    <TextBlock x:Name="PreviewChange" Text="None" TextWrapping="Wrap" />
+                    <TextBlock Text="WARNINGS / SKIPPED" FontSize="10" FontWeight="Bold" Foreground="#E4B56E" Margin="0,14,0,5" />
+                    <TextBlock x:Name="PreviewWarnings" Text="None" TextWrapping="Wrap" Foreground="#D9C49C" />
+                    <TextBlock Text="MANUAL RECOMMENDATIONS" FontSize="10" FontWeight="Bold" Foreground="#8796A8" Margin="0,14,0,5" />
+                    <ItemsControl x:Name="PreviewRecommendations" />
+                    <TextBlock Text="OPEN SUPPORTED WINDOWS SETTINGS" FontSize="10" FontWeight="Bold" Foreground="#8796A8" Margin="0,14,0,6" />
+                    <StackPanel Orientation="Horizontal">
+                      <Button x:Name="OpenGameModeSettingsButton" Content="Game Mode" />
+                      <Button x:Name="OpenCaptureSettingsButton" Content="Captures" />
+                      <Button x:Name="OpenGraphicsSettingsButton" Content="Graphics" />
+                    </StackPanel>
+                    <TextBlock Text="Impact estimate: not calculated. Reboot: not required for an active-plan switch. Rollback: restore the previous plan from the timestamped backup." TextWrapping="Wrap" Foreground="#A9B5C3" Margin="0,14,0,0" />
+                  </StackPanel>
+                </Border>
+                <StackPanel Orientation="Horizontal" Margin="0,14,0,0"><CheckBox x:Name="SimulationModeCheck" Content="Simulation mode (default)" IsChecked="True"/><Button x:Name="ApplyProfileButton" Content="Apply reviewed profile" Style="{StaticResource PrimaryButton}" IsEnabled="False"/><Button x:Name="CancelProfileButton" Content="Cancel / clear preview"/></StackPanel>
+                <TextBlock x:Name="ApplyStatusText" Text="Simulation mode does not create a backup or write settings." FontSize="11" Foreground="#91A0B1" Margin="0,8,0,0" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel x:Name="ProfilesPanel" Visibility="Collapsed">
+            <TextBlock Text="Profiles are transparent presets, not tweak bundles." FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Choose the plan appropriate to your device. Unknown hardware always receives the safe universal behavior." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,16" />
+            <ItemsControl x:Name="ProfilesList" />
+            <Border Background="#151F2A" BorderBrush="#2B394A" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,14,0,0"><TextBlock Text="SAFE DEFAULT  ·  No registry, BCD, service, AppX, security, or network change is bundled into any profile. High-performance plans are skipped on battery or when not already installed." TextWrapping="Wrap" Foreground="#B7C2CF"/></Border>
+          </StackPanel>
+
+          <StackPanel x:Name="TweaksPanel" Visibility="Collapsed">
+            <TextBlock Text="Every listed action includes purpose, risk, compatibility, expected behavior, and rollback." FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="Unverified registry recipes and undocumented driver settings from V9.3 are retired, not carried forward." Foreground="#92A0B1" Margin="0,5,0,12" />
+            <TextBox x:Name="TweakSearchBox" Height="35" Width="340" HorizontalAlignment="Left" ToolTip="Filter the catalog" />
+            <ItemsControl x:Name="TweakCatalogList" Margin="0,12,0,0" />
+          </StackPanel>
+
+          <StackPanel x:Name="GamesPanel" Visibility="Collapsed">
+            <TextBlock Text="Read-only game discovery" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Steam and Epic manifests, installed package metadata, and registered titles are inspected locally. Paths are suggestions; verify them before using Windows per-game settings." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,10" />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,5"><Button x:Name="RefreshGamesButton" Content="Refresh library"/><Button x:Name="AddCustomGameButton" Content="Add executable…"/></StackPanel>
+            <DataGrid x:Name="GamesGrid" Height="250" />
+            <TextBlock Text="GAME PROFILES — ADVISORY ONLY" FontSize="10" FontWeight="Bold" Foreground="#8796A8" Margin="0,18,0,6" />
+            <ItemsControl x:Name="GameGuidanceList" />
+            <TextBlock Text="No game memory access, process injection, anti-cheat interaction, permanent priority forcing, or game-file edits. Use the game itself or trusted telemetry for FPS and frame time." TextWrapping="Wrap" Foreground="#A9B5C3" Margin="0,12,0,0" />
+          </StackPanel>
+
+          <StackPanel x:Name="HardwarePanel" Visibility="Collapsed">
+            <TextBlock Text="Hardware and Windows inventory" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Values come from Windows CIM/WMI and may be incomplete or firmware-reported. Unknown means unavailable—not inferred." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,12" />
+            <TextBox x:Name="HardwareOutput" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="570" />
+          </StackPanel>
+
+          <StackPanel x:Name="NetworkPanel" Visibility="Collapsed">
+            <TextBlock Text="Network — diagnostics first, changes by explicit choice" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="A resolver affects DNS lookups, not the route to a game server. Do not change DNS to chase an unmeasured in-game ping." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,16" />
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="16">
+              <StackPanel>
+                <TextBlock Text="CONNECTED ADAPTER" FontSize="10" FontWeight="Bold" Foreground="#8796A8" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,12"><ComboBox x:Name="AdapterCombo" Width="470"/><Button x:Name="RefreshAdaptersButton" Content="Refresh"/></StackPanel>
+                <TextBlock x:Name="AdapterDetailsText" Text="No adapter selected." Foreground="#A9B5C3" TextWrapping="Wrap" Margin="0,0,0,12" />
+                <TextBlock Text="DNS RESOLVER  ·  IPv4  ·  DHCP adapters only" FontSize="10" FontWeight="Bold" Foreground="#8796A8" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,12"><ComboBox x:Name="DnsProviderCombo" Width="220"/><TextBox x:Name="CustomDnsText" Width="300" IsEnabled="False" ToolTip="Comma-separated IPv4 DNS addresses"/><Button x:Name="ApplyDnsButton" Content="Preview &amp; apply DNS"/></StackPanel>
+                <TextBlock x:Name="DnsStatusText" Text="VPN, virtual, disconnected, and static-DNS adapters are not modified." Foreground="#91A0B1" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,14,0,0">
+              <StackPanel><TextBlock Text="ICMP PING TEST" FontSize="10" FontWeight="Bold" Foreground="#8796A8"/><StackPanel Orientation="Horizontal" Margin="0,8,0,10"><TextBox x:Name="PingHostBox" Text="1.1.1.1" Width="250"/><Button x:Name="PingButton" Content="Run 4 pings"/></StackPanel><TextBlock x:Name="PingResultText" Text="No test run." TextWrapping="Wrap" Foreground="#B7C2CF" /></StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel x:Name="InputPanel" Visibility="Collapsed">
+            <TextBlock Text="Input latency — no guarantees, no firmware writes" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Generic Windows interfaces cannot reliably report a mouse's hardware polling rate or a driver's exact DPC/ISR execution latency." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,14" />
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="16">
+              <StackPanel><TextBlock Text="CURRENT USER POINTER SETTINGS" FontSize="10" FontWeight="Bold" Foreground="#8796A8"/><TextBlock x:Name="InputSettingsText" Text="Not read." Margin="0,9,0,12" TextWrapping="Wrap"/><Button x:Name="OpenMouseSettingsButton" Content="Open Mouse settings" HorizontalAlignment="Left"/></StackPanel>
+            </Border>
+            <Border Background="#1B1A17" BorderBrush="#665236" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,14,0,0"><StackPanel><TextBlock Text="DPC / ISR DIAGNOSTICS" Foreground="#E4B56E" FontWeight="Bold"/><TextBlock Text="Exact per-driver DPC/ISR latency requires a proper ETW trace or a trusted specialist tool. Platinum Optimizer does not fake a latency number or attribute a driver based on a short CPU sample. The Diagnostics page may show DPC-time percentage only; that is not latency." TextWrapping="Wrap" Foreground="#D1C5B0" Margin="0,7,0,0"/></StackPanel></Border>
+          </StackPanel>
+
+          <StackPanel x:Name="StoragePanel" Visibility="Collapsed">
+            <TextBlock Text="Storage health and free space" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Windows-reported device metadata is shown when available. TRIM/Optimize is left to Windows' scheduled optimization; SSDs are not manually defragmented." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,10" />
+            <TextBox x:Name="StorageOutput" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="300" />
+            <Border Background="#151F2A" BorderBrush="#2B394A" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,12,0,0"><StackPanel><TextBlock Text="TEMP CLEANUP — OPTIONAL, NOT AN OPTIMIZATION" FontSize="10" FontWeight="Bold" Foreground="#E4B56E"/><TextBlock Text="Only user TEMP files older than seven days are eligible. A preview is required. Deletion is not reversible. Windows logs, driver stores, shader caches, browser caches, and update internals are never targeted." TextWrapping="Wrap" Foreground="#B7C2CF" Margin="0,6,0,10"/><StackPanel Orientation="Horizontal"><Button x:Name="PreviewTempButton" Content="Preview files"/><Button x:Name="CleanTempButton" Content="Delete reviewed files" IsEnabled="False"/><TextBlock x:Name="TempStatusText" Text="No preview yet." Foreground="#91A0B1" VerticalAlignment="Center"/></StackPanel></StackPanel></Border>
+          </StackPanel>
+
+          <StackPanel x:Name="DebloatPanel" Visibility="Collapsed">
+            <TextBlock Text="Installed app inventory — no mass removal" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="System, Store, Xbox, Bluetooth, camera, printing, OneDrive, and Windows Update may be required by your setup. Packages are classified for review only; removal is disabled because reliable restore is not guaranteed offline." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,10" />
+            <Button x:Name="RefreshAppxButton" Content="Refresh installed packages" HorizontalAlignment="Left" />
+            <DataGrid x:Name="AppxGrid" Height="480" />
+          </StackPanel>
+
+          <StackPanel x:Name="ServicesPanel" Visibility="Collapsed">
+            <TextBlock Text="Service dependency audit — read-only" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Current state, startup mode, dependencies, and dependent count are shown where Windows exposes them. No service is stopped or disabled. SAFE_TO_DISABLE is intentionally empty." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,10" />
+            <StackPanel Orientation="Horizontal"><TextBox x:Name="ServiceSearchBox" Height="35" Width="340" HorizontalAlignment="Left" ToolTip="Filter services"/><Button x:Name="RefreshServicesButton" Content="Refresh inventory"/></StackPanel>
+            <DataGrid x:Name="ServicesGrid" Height="500" />
+          </StackPanel>
+
+          <StackPanel x:Name="StartupPanel" Visibility="Collapsed">
+            <TextBlock Text="Startup manager — inspect before changing" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Impact is not guessed; the application never disables an entry. Open Windows Startup settings to make a user-confirmed change." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,10" />
+            <StackPanel Orientation="Horizontal"><Button x:Name="RefreshStartupButton" Content="Refresh startup list"/><Button x:Name="OpenStartupSettingsButton" Content="Open Windows Startup settings"/></StackPanel>
+            <DataGrid x:Name="StartupGrid" Height="500" />
+          </StackPanel>
+
+          <StackPanel x:Name="DiagnosticsPanel" Visibility="Collapsed">
+            <TextBlock Text="Before / after — system samples, not a game benchmark" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="A short sample records Windows counters when available; it does not send network probes. Use the separate network test only when you choose to. Capture both samples under comparable conditions. FPS, frame time, thermals, and exact DPC/ISR latency remain Not measured unless a legitimate source exists." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,12" />
+            <StackPanel Orientation="Horizontal"><Button x:Name="CaptureBeforeButton" Content="Capture before"/><Button x:Name="CaptureAfterButton" Content="Capture after"/><Button x:Name="RunNetworkTestButton" Content="Run network test"/><Button x:Name="AuditTasksButton" Content="Audit scheduled tasks"/><Button x:Name="AuditBcdButton" Content="Inspect BCD (read-only)"/></StackPanel>
+            <TextBlock x:Name="BenchmarkScoreText" Text="Performance score: NOT SCORED" Foreground="#E4B56E" FontWeight="Bold" Margin="0,14,0,7" />
+            <DataGrid x:Name="BenchmarkGrid" Height="310" />
+            <TextBlock Text="SCHEDULED TASK AUDIT — READ ONLY" FontSize="10" FontWeight="Bold" Foreground="#8796A8" Margin="0,14,0,2" />
+            <DataGrid x:Name="TasksGrid" Height="230" />
+            <TextBox x:Name="DiagnosticsOutput" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="160" Margin="0,12,0,0" />
+          </StackPanel>
+
+          <StackPanel x:Name="RestorePanel" Visibility="Collapsed">
+            <TextBlock Text="Restore center" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Timestamped local snapshots cover system inventory, current plan, DNS state, registry preference values, service inventory, and a read-only BCD entry. Only sections the optimizer actually changed are restored." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,10" />
+            <StackPanel Orientation="Horizontal"><Button x:Name="RefreshBackupsButton" Content="Refresh backups"/><Button x:Name="RestoreBackupButton" Content="Restore selected" IsEnabled="False"/><Button x:Name="ExportBackupButton" Content="Export ZIP…" IsEnabled="False"/><Button x:Name="DeleteBackupButton" Content="Delete backup" IsEnabled="False"/></StackPanel>
+            <DataGrid x:Name="BackupsGrid" Height="330" />
+            <TextBlock x:Name="BackupDetailText" Text="Select a backup to inspect its status and change history." TextWrapping="Wrap" Foreground="#A9B5C3" Margin="0,12,0,0" />
+            <TextBlock Text="Exports are unencrypted and can contain device model, adapter, DNS, service, and OS metadata. Store them privately." TextWrapping="Wrap" Foreground="#E4B56E" FontSize="11" Margin="0,10,0,0" />
+          </StackPanel>
+
+          <StackPanel x:Name="SettingsPanel" Visibility="Collapsed">
+            <TextBlock Text="Settings, local data, and permissions" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock x:Name="SettingsInfoText" Text="Local-only by design." TextWrapping="Wrap" Foreground="#A9B5C3" Margin="0,8,0,12" />
+            <StackPanel Orientation="Horizontal"><Button x:Name="OpenDataFolderButton" Content="Open local data folder"/><Button x:Name="RunAsAdminButton" Content="Restart as Administrator"/></StackPanel>
+            <Border Background="#151F2A" BorderBrush="#2B394A" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,16,0,0"><TextBlock Text="Elevation is never requested at startup. Continue in limited read-only mode, or explicitly restart elevated only when applying a reversible plan or restoring a backup." TextWrapping="Wrap" Foreground="#B7C2CF"/></Border>
+            <TextBlock Text="Application logs use JSON Lines and remain under the current user's LocalAppData. No network telemetry, crash upload, or remote command path exists." TextWrapping="Wrap" Foreground="#91A0B1" Margin="0,14,0,0" />
+          </StackPanel>
+        </Grid>
+      </ScrollViewer>
+      <Border Grid.Row="2" Background="#0D131C" BorderBrush="#202A36" BorderThickness="0,1,0,0">
+        <Grid Margin="30,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="FooterStatusText" Text="Ready · local diagnostics only" Foreground="#718195" FontSize="10" VerticalAlignment="Center"/><TextBlock Text="PLATINUM OPTIMIZER  /  1.0.0" Foreground="#718195" FontSize="10" VerticalAlignment="Center" Grid.Column="1"/></Grid>
+      </Border>
+    </Grid>
+  </Grid>
+</Window>

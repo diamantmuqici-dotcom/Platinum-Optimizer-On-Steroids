@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "recommendedFirstRun": "safe",
+  "profiles": [
+    {
+      "id": "safe",
+      "name": "Safe",
+      "description": "Read-only review and Windows Settings shortcuts. Makes no automatic system changes.",
+      "powerTarget": "keep",
+      "riskCeiling": "LOW",
+      "requiresExplicitHighRiskConfirmation": false,
+      "manualRecommendations": ["game-mode", "capture-settings", "graphics-settings", "startup-settings"],
+      "notes": ["Windows Update, Microsoft Store, Defender, Firewall, UAC, services, and driver settings are left unchanged."]
+    },
+    {
+      "id": "balanced",
+      "name": "Balanced",
+      "description": "Selects the existing Windows Balanced plan if the user chooses Apply; all advanced plan values remain untouched.",
+      "powerTarget": "balanced",
+      "riskCeiling": "LOW",
+      "requiresExplicitHighRiskConfirmation": false,
+      "manualRecommendations": ["game-mode", "capture-settings", "graphics-settings"],
+      "notes": ["The prior active plan is backed up and can be restored. No reboot is required."]
+    },
+    {
+      "id": "gaming",
+      "name": "Gaming",
+      "description": "On a desktop or a laptop explicitly connected to AC power, offers the already-installed High Performance plan. Otherwise it keeps the current plan.",
+      "powerTarget": "high-performance",
+      "riskCeiling": "LOW",
+      "requiresExplicitHighRiskConfirmation": false,
+      "manualRecommendations": ["game-mode", "capture-settings", "graphics-settings", "mouse-settings"],
+      "notes": ["Higher power draw, fan noise, and heat are possible. No FPS gain is promised."]
+    },
+    {
+      "id": "competitive",
+      "name": "Competitive",
+      "description": "Offers the existing High Performance plan only when compatibility and AC-power checks pass. No Realtime process priority, service disabling, BCD, interrupt-affinity, or driver-registry changes are made.",
+      "powerTarget": "high-performance",
+      "riskCeiling": "LOW",
+      "requiresExplicitHighRiskConfirmation": false,
+      "manualRecommendations": ["game-mode", "capture-settings", "graphics-settings", "mouse-settings"],
+      "notes": ["DPC/ISR latency is not measured by this application; frame-time consistency must be measured inside the game or a trusted benchmark."]
+    },
+    {
+      "id": "max-performance",
+      "name": "Maximum Performance",
+      "description": "Offers an already-installed Ultimate Performance plan, or High Performance if Ultimate is absent. Requires a separate thermal/power warning confirmation and AC power on portable systems.",
+      "powerTarget": "ultimate-or-high-performance",
+      "riskCeiling": "MODERATE",
+      "requiresExplicitHighRiskConfirmation": true,
+      "manualRecommendations": ["game-mode", "capture-settings", "graphics-settings"],
+      "notes": ["This changes only the active built-in plan. It does not disable thermal protection or force CPU/GPU clocks. Do not use automatically while hot or on battery."]
+    },
+    {
+      "id": "laptop-battery",
+      "name": "Laptop Battery",
+      "description": "For a detected portable device, selects the existing Power Saver plan, falling back to Balanced. No maximum-performance policy is applied.",
+      "powerTarget": "power-saver-or-balanced",
+      "riskCeiling": "LOW",
+      "requiresExplicitHighRiskConfirmation": false,
+      "manualRecommendations": ["game-mode", "capture-settings"],
+      "notes": ["This profile is intended to favor battery life, not maximum gaming performance."]
+    },
+    {
+      "id": "custom",
+      "name": "Custom",
+      "description": "No changes are preselected. Choose an individual reversible action in its own page.",
+      "powerTarget": "keep",
+      "riskCeiling": "LOW",
+      "requiresExplicitHighRiskConfirmation": false,
+      "manualRecommendations": ["game-mode", "capture-settings", "graphics-settings", "mouse-settings", "startup-settings"],
+      "notes": ["DNS, cleanup, and power-plan actions require their own previews and confirmations."]
+    }
+  ]
+}

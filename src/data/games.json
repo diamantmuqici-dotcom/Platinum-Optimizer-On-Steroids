@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "detectionPolicy": "Read-only discovery. The library never reads game memory, injects code, modifies game files, or applies undocumented vendor/driver settings.",
+  "games": [
+    {"id":"cs2","name":"Counter-Strike 2","matchNames":["Counter-Strike 2","Counter-Strike: Global Offensive"],"executables":["cs2.exe"],"focus":["Measure in-game frame times with the game's own telemetry or a trusted overlay.","Review Windows Game Mode, capture, and per-game graphics preferences manually." ]},
+    {"id":"rust","name":"Rust","matchNames":["Rust"],"executables":["RustClient.exe"],"focus":["Watch memory pressure and shader/cache behavior during a repeatable route.","No process priority or memory registry tweak is applied." ]},
+    {"id":"valorant","name":"VALORANT","matchNames":["VALORANT"],"executables":["VALORANT-Win64-Shipping.exe"],"focus":["Keep anti-cheat and Riot services intact.","Use the game's own latency and frame-time settings." ]},
+    {"id":"fortnite","name":"Fortnite","matchNames":["Fortnite"],"executables":["FortniteClient-Win64-Shipping.exe"],"focus":["Compare DX12/Performance mode and shader compilation in a consistent workload.","No global shader-cache deletion is performed." ]},
+    {"id":"apex","name":"Apex Legends","matchNames":["Apex Legends"],"executables":["r5apex.exe"],"focus":["Use a repeatable practice range and record frame-time percentiles.","No anti-cheat-sensitive process manipulation is performed." ]},
+    {"id":"warzone","name":"Call of Duty / Warzone","matchNames":["Call of Duty: Warzone","Warzone"],"executables":["cod.exe"],"focus":["Use in-game benchmark or telemetry when available.","No driver profile or shader-cache setting is overwritten." ]},
+    {"id":"tarkov","name":"Escape from Tarkov","matchNames":["Escape from Tarkov","EscapeFromTarkov"],"executables":["EscapeFromTarkov.exe"],"focus":["Monitor available memory and repeat the same map/route for comparison.","No automatic page-file or process-priority change is made." ]},
+    {"id":"pubg","name":"PUBG: BATTLEGROUNDS","matchNames":["PUBG: BATTLEGROUNDS","PUBG"],"executables":["TslGame.exe"],"focus":["Measure 1% lows and frame times in a repeatable match or replay.","No system-wide network tweak is applied." ]},
+    {"id":"r6siege","name":"Rainbow Six Siege","matchNames":["Rainbow Six Siege","Tom Clancy's Rainbow Six Siege"],"executables":["RainbowSix.exe","RainbowSix_Vulkan.exe"],"focus":["Choose the renderer and graphics options in the game.","No global VSync or overlay policy is forced." ]},
+    {"id":"overwatch","name":"Overwatch","matchNames":["Overwatch"],"executables":["Overwatch.exe"],"focus":["Use the in-game frame-rate and latency indicators for repeatable comparisons.","No permanent process priority is assigned." ]},
+    {"id":"minecraft","name":"Minecraft","matchNames":["Minecraft Launcher","Minecraft for Windows","Minecraft"],"executables":["javaw.exe","Minecraft.Windows.exe"],"focus":["Java edition and Bedrock use different runtimes; select the actual game executable.","No Java flags or memory limits are changed." ]},
+    {"id":"gtav","name":"Grand Theft Auto V","matchNames":["Grand Theft Auto V","Grand Theft Auto V Enhanced","GTA V"],"executables":["GTA5.exe","GTA5_Enhanced.exe"],"focus":["Use the game's own graphics and frame limiter controls.","No global graphics-driver profile is written." ]},
+    {"id":"the-finals","name":"THE FINALS","matchNames":["THE FINALS"],"executables":["Discovery.exe"],"focus":["Validate the executable path before using a per-game Windows graphics preference.","No game files or anti-cheat components are modified." ]},
+    {"id":"dayz","name":"DayZ","matchNames":["DayZ"],"executables":["DayZ_x64.exe"],"focus":["Use a repeatable location and server when comparing frame times.","No network registry tweak is applied." ]},
+    {"id":"battlefield","name":"Battlefield","matchNames":["Battlefield 2042","Battlefield 6","Battlefield V","Battlefield 1"],"executables":["bf2042.exe","bfv.exe","bf1.exe"],"focus":["Select the exact installed title and executable; the franchise entry is not a wildcard.","No anti-cheat or service changes are made." ]},
+    {"id":"destiny2","name":"Destiny 2","matchNames":["Destiny 2"],"executables":["destiny2.exe"],"focus":["Compare the same activity and capture the game's frame-time data.","No process injection or permanent priority change is applied." ]},
+    {"id":"arc-raiders","name":"ARC Raiders","matchNames":["ARC Raiders"],"executables":[],"focus":["Executable name is intentionally left for user confirmation until verified against the installed build.","No game-specific tweak is applied." ]}
+  ]
+}
