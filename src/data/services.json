@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "policy": "Read-only service audit. No service is disabled by a profile. SAFE_TO_DISABLE is intentionally empty; dependencies, edition, features, hardware, and user workflows are machine-specific.",
+  "classifications": {
+    "SECURITY_CRITICAL": ["WinDefend", "WdNisSvc", "WdFilter", "SecurityHealthService", "wscsvc", "BFE", "MpsSvc", "CryptSvc", "KeyIso", "SamSs", "LSASS", "EventLog"],
+    "DO_NOT_TOUCH": ["RpcSs", "DcomLaunch", "PlugPlay", "Power", "Winmgmt", "Schedule", "ProfSvc", "Appinfo", "gpsvc", "AppXSvc", "ClipSVC", "wuauserv", "UsoSvc", "WaaSMedicSvc", "BITS", "Dhcp", "Dnscache", "NlaSvc", "nsi", "Tcpip", "LanmanWorkstation", "LanmanServer"],
+    "HARDWARE_DEPENDENT": ["Audiosrv", "AudioEndpointBuilder", "bthserv", "BthAvctpSvc", "BluetoothUserService", "WlanSvc", "WwanSvc", "HidServ", "TabletInputService", "Spooler", "stisvc", "SensorService", "lfsvc", "DisplayEnhancementService", "RtkAudioUniversalService", "igfx", "AMD Crash Defender Service"],
+    "CONDITIONAL": ["SysMain", "DiagTrack", "WerSvc", "MapsBroker", "Fax", "RemoteRegistry", "RetailDemo", "WMPNetworkSvc", "XblAuthManager", "XboxNetApiSvc", "XboxGipSvc", "XblGameSave", "SharedAccess", "PhoneSvc", "PcaSvc", "DoSvc", "InstallService", "PushToInstall", "OneSyncSvc", "CDPSvc"],
+    "OPTIONAL": [],
+    "SAFE_TO_DISABLE": []
+  },
+  "notes": [
+    "A label is a review hint, not a recommendation to stop or disable a service.",
+    "Services can be trigger-started, per-user, policy-managed, or required by a feature not visible in a simple service list.",
+    "Use Windows Services or the feature's own UI for any user-directed change; this tool does not apply service startup changes."
+  ]
+}
