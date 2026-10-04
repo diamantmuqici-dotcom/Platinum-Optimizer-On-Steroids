@@ -86,49 +86,49 @@ function Format-POHardwareReport {
     param([Parameter(Mandatory = $true)][psobject]$Snapshot)
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('OPERATING SYSTEM')
-    $lines.Add("  $($Snapshot.OS.Name)  ·  Version $($Snapshot.OS.Version)  ·  Build $($Snapshot.OS.Build)  ·  $($Snapshot.OS.Architecture)")
-    $lines.Add("  Family gate: $(if ($Snapshot.OS.Supported) { 'Windows 10/11' } else { 'Unsupported / unknown' })  ·  Servicing lifecycle: $($Snapshot.OS.ServicingStatus)")
+    $lines.Add("  $($Snapshot.OS.Name)  |  Version $($Snapshot.OS.Version)  |  Build $($Snapshot.OS.Build)  |  $($Snapshot.OS.Architecture)")
+    $lines.Add("  Family gate: $(if ($Snapshot.OS.Supported) { 'Windows 10/11' } else { 'Unsupported / unknown' })  |  Servicing lifecycle: $($Snapshot.OS.ServicingStatus)")
     if (@($Snapshot.CollectionWarnings).Count -gt 0) {
         $lines.Add('')
-        $lines.Add('COLLECTION WARNINGS — some inventory queries failed; affected fields are unknown')
+        $lines.Add('COLLECTION WARNINGS - some inventory queries failed; affected fields are unknown')
         foreach ($warning in @($Snapshot.CollectionWarnings)) { $lines.Add("  $($warning.ClassName): $($warning.Error)") }
     }
     $lines.Add('')
     $lines.Add('DEVICE / POWER')
     $lines.Add("  $($Snapshot.Device.Manufacturer) $($Snapshot.Device.Model)")
-    $lines.Add("  Form factor: $($Snapshot.Device.FormFactor)  ·  Power source: $($Snapshot.Device.PowerSource)")
+    $lines.Add("  Form factor: $($Snapshot.Device.FormFactor)  |  Power source: $($Snapshot.Device.PowerSource)")
     $lines.Add('')
     $lines.Add('CPU')
-    $lines.Add("  $($Snapshot.CPU.Vendor)  ·  $($Snapshot.CPU.Model)")
-    $lines.Add("  Architecture: $($Snapshot.CPU.Architecture)  ·  Cores: $(Format-POValue $Snapshot.CPU.PhysicalCores)  ·  Logical processors: $(Format-POValue $Snapshot.CPU.LogicalProcessors)")
+    $lines.Add("  $($Snapshot.CPU.Vendor)  |  $($Snapshot.CPU.Model)")
+    $lines.Add("  Architecture: $($Snapshot.CPU.Architecture)  |  Cores: $(Format-POValue $Snapshot.CPU.PhysicalCores)  |  Logical processors: $(Format-POValue $Snapshot.CPU.LogicalProcessors)")
     $lines.Add("  Maximum / current clock reported by WMI: $(Format-POValue $Snapshot.CPU.MaximumClockReportedMHz 'MHz') / $(Format-POValue $Snapshot.CPU.CurrentClockReportedMHz 'MHz')")
-    $lines.Add("  L2 / L3 cache: $(Format-POValue $Snapshot.CPU.L2CacheKB 'KB') / $(Format-POValue $Snapshot.CPU.L3CacheKB 'KB')  ·  Virtualization firmware: $(Format-POValue $Snapshot.CPU.VirtualizationFirmwareEnabled)")
-    $lines.Add("  NUMA nodes reported: $(Format-POValue $Snapshot.CPU.NumaNodes)  ·  Generation: $($Snapshot.CPU.Generation)")
+    $lines.Add("  L2 / L3 cache: $(Format-POValue $Snapshot.CPU.L2CacheKB 'KB') / $(Format-POValue $Snapshot.CPU.L3CacheKB 'KB')  |  Virtualization firmware: $(Format-POValue $Snapshot.CPU.VirtualizationFirmwareEnabled)")
+    $lines.Add("  NUMA nodes reported: $(Format-POValue $Snapshot.CPU.NumaNodes)  |  Generation: $($Snapshot.CPU.Generation)")
     $lines.Add("  Hybrid P/E topology: $($Snapshot.CPU.PerformanceEfficiencyCoreTopology)")
     $lines.Add('')
     $lines.Add('GRAPHICS ADAPTERS')
     if (@($Snapshot.GPUs).Count -eq 0) { $lines.Add('  No GPU controller reported by WMI.') }
     foreach ($gpu in @($Snapshot.GPUs)) {
-        $lines.Add("  $($gpu.Vendor)  ·  $($gpu.Name)")
-        $lines.Add("  Driver: $(Format-POValue $gpu.DriverVersion)  ·  Reported adapter memory: $(Format-POValue $gpu.ReportedVRAMGB 'GB')")
+        $lines.Add("  $($gpu.Vendor)  |  $($gpu.Name)")
+        $lines.Add("  Driver: $(Format-POValue $gpu.DriverVersion)  |  Reported adapter memory: $(Format-POValue $gpu.ReportedVRAMGB 'GB')")
         $lines.Add("  Adapter-reported mode: $(Format-POValue $gpu.ResolutionReportedByAdapter) @ $(Format-POValue $gpu.RefreshRateReportedByAdapterHz 'Hz')")
         $lines.Add('  Shared GPU memory: Unknown (not reliably exposed by this query).')
     }
     $lines.Add('')
     $lines.Add('MEMORY')
-    $lines.Add("  Total: $(Format-POValue $Snapshot.Memory.TotalGB 'GB')  ·  Available: $(Format-POValue $Snapshot.Memory.AvailableGB 'GB')")
-    $lines.Add("  Channels: $($Snapshot.Memory.Channels)  ·  Compression: $($Snapshot.Memory.Compression)")
+    $lines.Add("  Total: $(Format-POValue $Snapshot.Memory.TotalGB 'GB')  |  Available: $(Format-POValue $Snapshot.Memory.AvailableGB 'GB')")
+    $lines.Add("  Channels: $($Snapshot.Memory.Channels)  |  Compression: $($Snapshot.Memory.Compression)")
     foreach ($module in @($Snapshot.Memory.Modules)) {
-        $lines.Add("  DIMM: $(Format-POValue $module.CapacityGB 'GB') @ $(Format-POValue $module.SpeedMHz 'MHz')  ·  Type code $(Format-POValue $module.MemoryTypeCode)  ·  $($module.DeviceLocator)")
+        $lines.Add("  DIMM: $(Format-POValue $module.CapacityGB 'GB') @ $(Format-POValue $module.SpeedMHz 'MHz')  |  Type code $(Format-POValue $module.MemoryTypeCode)  |  $($module.DeviceLocator)")
     }
     $lines.Add('')
     $lines.Add('STORAGE')
     if ($Snapshot.SystemVolume) { $lines.Add("  System volume $($Snapshot.SystemVolume.Drive): $(Format-POValue $Snapshot.SystemVolume.SizeGB 'GB') total, $(Format-POValue $Snapshot.SystemVolume.FreeGB 'GB') free ($($Snapshot.SystemVolume.FreePercent)%). $($Snapshot.SystemVolume.Warning)") }
-    foreach ($disk in @($Snapshot.Storage)) { $lines.Add("  $($disk.Model)  ·  $(Format-POValue $disk.SizeGB 'GB')  ·  $($disk.Interface) / $($disk.MediaType)  ·  health $($disk.StatusReportedByWMI)") }
+    foreach ($disk in @($Snapshot.Storage)) { $lines.Add("  $($disk.Model)  |  $(Format-POValue $disk.SizeGB 'GB')  |  $($disk.Interface) / $($disk.MediaType)  |  health $($disk.StatusReportedByWMI)") }
     $lines.Add('  Temperature/SMART detail: Unknown unless the Windows storage provider explicitly reports it.')
     $lines.Add('')
     $lines.Add('MOTHERBOARD / BIOS')
-    $lines.Add("  $($Snapshot.Motherboard.Manufacturer) $($Snapshot.Motherboard.Model)  ·  BIOS $($Snapshot.BIOS.Version) dated $($Snapshot.BIOS.ReleaseDate)")
+    $lines.Add("  $($Snapshot.Motherboard.Manufacturer) $($Snapshot.Motherboard.Model)  |  BIOS $($Snapshot.BIOS.Version) dated $($Snapshot.BIOS.ReleaseDate)")
     $lines.Add('  Firmware update: information only; no automatic download or flash.')
     $lines.Add('')
     $lines.Add('SIGNED DRIVER INVENTORY (WINDOWS-PROVIDED METADATA)')
@@ -136,11 +136,11 @@ function Format-POHardwareReport {
     $driverStatusRows = @($allDriverRows | Where-Object { $_.DeviceClass -in @('QUERY FAILED', 'NO MATCH') })
     $driverRows = @($allDriverRows | Where-Object { $_.DeviceClass -notin @('QUERY FAILED', 'NO MATCH') } | Select-Object -First 60)
     if ($driverStatusRows.Count -gt 0) { foreach ($row in $driverStatusRows) { $lines.Add("  $($row.DeviceClass): $($row.Action)") } }
-    foreach ($driver in $driverRows) { $lines.Add("  [$($driver.DeviceClass)] $($driver.Device) · $($driver.Manufacturer) · version $($driver.DriverVersion) · date $($driver.DriverDate) · signed=$($driver.Signed)") }
+    foreach ($driver in $driverRows) { $lines.Add("  [$($driver.DeviceClass)] $($driver.Device) | $($driver.Manufacturer) | version $($driver.DriverVersion) | date $($driver.DriverDate) | signed=$($driver.Signed)") }
     if ($allDriverRows.Count -gt 60) { $lines.Add('  Display limited to the first 60 matching devices.') }
     $lines.Add('')
     $lines.Add('MONITORS')
-    foreach ($monitor in @($Snapshot.Monitors)) { $lines.Add("  $($monitor.Manufacturer) $($monitor.Model)  ·  active=$($monitor.Active)  ·  resolution/refresh/HDR/color depth=$($monitor.Resolution) / $($monitor.RefreshRateHz) / $($monitor.HDR) / $($monitor.ColorDepth)") }
+    foreach ($monitor in @($Snapshot.Monitors)) { $lines.Add("  $($monitor.Manufacturer) $($monitor.Model)  |  active=$($monitor.Active)  |  resolution/refresh/HDR/color depth=$($monitor.Resolution) / $($monitor.RefreshRateHz) / $($monitor.HDR) / $($monitor.ColorDepth)") }
     return ($lines -join [Environment]::NewLine)
 }
 
@@ -149,7 +149,7 @@ function Update-POStatusBadge {
     $status = Get-POControl 'StatusText'
     if ($script:poSnapshot -and $script:poSnapshot.OS.Supported) {
         $dot.Fill = [Windows.Media.Brushes]::MediumSeaGreen
-        $status.Text = 'READY · SAFE MODE'
+        $status.Text = 'READY | SAFE MODE'
         $status.Foreground = [Windows.Media.Brushes]::LightGreen
     }
     else {
@@ -158,7 +158,7 @@ function Update-POStatusBadge {
         $status.Foreground = [Windows.Media.Brushes]::Gold
     }
     $admin = Test-POIsAdministrator
-    (Get-POControl 'AdminStatusText').Text = if ($admin) { 'Administrator · changes available' } else { 'Limited mode · read-only' }
+    (Get-POControl 'AdminStatusText').Text = if ($admin) { 'Administrator | changes available' } else { 'Limited mode | read-only' }
 }
 
 function Refresh-POHome {
@@ -168,23 +168,23 @@ function Refresh-POHome {
         Update-POStatusBadge
         $snap = $script:poSnapshot
         (Get-POControl 'HomeCpu').Text = [string]$snap.CPU.Model
-        (Get-POControl 'HomeCpuDetail').Text = "$(Format-POValue $snap.CPU.PhysicalCores) cores · $(Format-POValue $snap.CPU.LogicalProcessors) threads · $($snap.CPU.Vendor)"
+        (Get-POControl 'HomeCpuDetail').Text = "$(Format-POValue $snap.CPU.PhysicalCores) cores | $(Format-POValue $snap.CPU.LogicalProcessors) threads | $($snap.CPU.Vendor)"
         $gpuNames = @($snap.GPUs | ForEach-Object { $_.Name })
         if ($gpuNames.Count -eq 0) { $gpuNames = @('Not reported') }
         (Get-POControl 'HomeGpu').Text = $gpuNames[0]
-        (Get-POControl 'HomeGpuDetail').Text = if ($snap.GPUs.Count -gt 1) { "$($snap.GPUs.Count) adapters reported" } elseif ($snap.GPUs.Count -eq 1) { "$(Format-POValue $snap.GPUs[0].DriverVersion 'driver') · $(Format-POValue $snap.GPUs[0].ReportedVRAMGB 'GB reported')" } else { 'No adapter reported' }
+        (Get-POControl 'HomeGpuDetail').Text = if ($snap.GPUs.Count -gt 1) { "$($snap.GPUs.Count) adapters reported" } elseif ($snap.GPUs.Count -eq 1) { "$(Format-POValue $snap.GPUs[0].DriverVersion 'driver') | $(Format-POValue $snap.GPUs[0].ReportedVRAMGB 'GB reported')" } else { 'No adapter reported' }
         (Get-POControl 'HomeRam').Text = "$(Format-POValue $snap.Memory.TotalGB 'GB') installed"
-        (Get-POControl 'HomeRamDetail').Text = "$(Format-POValue $snap.Memory.AvailableGB 'GB') currently available · compression not reported"
+        (Get-POControl 'HomeRamDetail').Text = "$(Format-POValue $snap.Memory.AvailableGB 'GB') currently available | compression not reported"
         (Get-POControl 'HomeWindows').Text = $snap.OS.Family
-        (Get-POControl 'HomeWindowsDetail').Text = "Build $(Format-POValue $snap.OS.Build) · $($snap.OS.Architecture) · $($snap.Device.FormFactor)"
-        (Get-POControl 'ReadinessTitle').Text = if ($snap.OS.Supported) { 'System detected · profile review required' } else { 'Unknown / unsupported Windows build' }
+        (Get-POControl 'HomeWindowsDetail').Text = "Build $(Format-POValue $snap.OS.Build) | $($snap.OS.Architecture) | $($snap.Device.FormFactor)"
+        (Get-POControl 'ReadinessTitle').Text = if ($snap.OS.Supported) { 'System detected | profile review required' } else { 'Unknown / unsupported Windows build' }
         (Get-POControl 'ReadinessDetail').Text = 'No change has been applied. Review a profile, compare the exact proposed action, and decide whether to proceed. No FPS or performance score is fabricated.'
-        (Get-POControl 'HomeSecurityText').Text = "Defender: $($script:poSecurity.Defender)  ·  Firewall: $($script:poSecurity.Firewall)`nMemory Integrity: $($script:poSecurity.MemoryIntegrity)  ·  Secure Boot: $($script:poSecurity.SecureBoot)  ·  TPM: $($script:poSecurity.TPM)  ·  UAC: $($script:poSecurity.UAC)"
+        (Get-POControl 'HomeSecurityText').Text = "Defender: $($script:poSecurity.Defender)  |  Firewall: $($script:poSecurity.Firewall)`nMemory Integrity: $($script:poSecurity.MemoryIntegrity)  |  Secure Boot: $($script:poSecurity.SecureBoot)  |  TPM: $($script:poSecurity.TPM)  |  UAC: $($script:poSecurity.UAC)"
         (Get-POControl 'HardwareOutput').Text = Format-POHardwareReport -Snapshot $snap
         $storageText = 'System volume metadata unavailable.'
-        if ($snap.SystemVolume) { $storageText = "$($snap.SystemVolume.Drive)  ·  $($snap.SystemVolume.SizeGB) GB total  ·  $($snap.SystemVolume.FreeGB) GB free  ·  $($snap.SystemVolume.FreePercent)% free" }
+        if ($snap.SystemVolume) { $storageText = "$($snap.SystemVolume.Drive)  |  $($snap.SystemVolume.SizeGB) GB total  |  $($snap.SystemVolume.FreeGB) GB free  |  $($snap.SystemVolume.FreePercent)% free" }
         if ($snap.SystemVolume.Warning) { $storageText += "`n`nWARNING: $($snap.SystemVolume.Warning). Low free space may affect system behavior." }
-        $storageText += "`n`nPhysical devices:`n" + (@($snap.Storage | ForEach-Object { "• $($_.Model) · $($_.MediaType) · $($_.SizeGB) GB · health reported: $($_.StatusReportedByWMI)" }) -join "`n")
+        $storageText += "`n`nPhysical devices:`n" + (@($snap.Storage | ForEach-Object { "- $($_.Model) | $($_.MediaType) | $($_.SizeGB) GB | health reported: $($_.StatusReportedByWMI)" }) -join "`n")
         $storageText += "`n`nTemperature: not exposed by the generic query. SSD TRIM and drive optimization remain under Windows' built-in schedule."
         (Get-POControl 'StorageOutput').Text = $storageText
         $pointer = @()
@@ -192,10 +192,10 @@ function Refresh-POHome {
             $state = Get-PORegValueState -Hive CurrentUser -SubKey 'Control Panel\Mouse' -ValueName $name
             $pointer += "$name = $(if (-not $state.Readable) { 'Unknown (registry read failed)' } elseif ($state.Exists) { $state.Data } else { 'Not set' })"
         }
-        (Get-POControl 'InputSettingsText').Text = ($pointer -join '   ·   ') + "`nMouse polling rate: not reliably available via generic Windows APIs. No pointer setting is changed."
+        (Get-POControl 'InputSettingsText').Text = ($pointer -join '   |   ') + "`nMouse polling rate: not reliably available via generic Windows APIs. No pointer setting is changed."
         (Get-POControl 'LastScanText').Text = "Updated $((Get-Date).ToString('HH:mm:ss'))"
         (Get-POControl 'SettingsInfoText').Text = "Windows 10/11 inventory: $($snap.OS.Family), build $($snap.OS.Build).`nPrivilege: $(if (Test-POIsAdministrator) { 'Administrator' } else { 'Limited mode (read-only until explicitly elevated)' }).`nLocal data: $(Get-POStateRoot)`nLocal JSONL log: $(Join-Path (Get-POStateRoot) 'logs\optimizer.jsonl')`nNo telemetry or remote services are used."
-        Set-POFooter 'System inventory refreshed · no changes applied' 'good'
+        Set-POFooter 'System inventory refreshed | no changes applied' 'good'
     }
     catch {
         Set-POFooter $_.Exception.Message 'error'
@@ -215,7 +215,7 @@ function Set-POPage {
     $titles = @{
         Home = @('Home', 'System status, hardware summary, and honest readiness facts.')
         Optimize = @('Optimize', 'Preview, validate, back up, apply, verify, and restore.')
-        Profiles = @('Profiles', 'Safe · Balanced · Gaming · Competitive · Maximum Performance · Laptop Battery · Custom')
+        Profiles = @('Profiles', 'Safe | Balanced | Gaming | Competitive | Maximum Performance | Laptop Battery | Custom')
         Tweaks = @('Tweak catalog', 'Every automated action is classified; unverified legacy tweaks are retired.')
         Games = @('Game library', 'Local discovery and advisory profiles; no game injection.')
         Hardware = @('Hardware', 'Windows-reported inventory; missing fields remain unknown.')
@@ -275,12 +275,12 @@ function Show-POProfilePlan {
     $active = Get-POActivePowerPlanGuid
     $script:poCurrentPlan = New-POProfilePlan -ProfileId $profileId -SystemSnapshot $script:poSnapshot -PowerPlans $plans -ActivePlanGuid $active
     $plan = $script:poCurrentPlan
-    (Get-POControl 'PreviewHeadline').Text = "$($plan.ProfileName)  ·  $($plan.TargetPowerPlanName)"
+    (Get-POControl 'PreviewHeadline').Text = "$($plan.ProfileName)  |  $($plan.TargetPowerPlanName)"
     (Get-POControl 'PreviewSummary').Text = $plan.Description
     if ($plan.Change) {
         $fromName = @($plans | Where-Object { $_.Guid -eq $plan.Change.FromGuid } | Select-Object -First 1)
         $fromDisplay = if ($fromName.Count -gt 0) { $fromName[0].Name } else { 'Current plan (name unavailable)' }
-        (Get-POControl 'PreviewChange').Text = "$($plan.Change.Risk) RISK  ·  $fromDisplay  →  $($plan.TargetPowerPlanName)`nOnly selects an existing Windows scheme. No AC/DC values, processor limits, clocks, service state, registry, or BCD are changed.`nAdministrator: yes  ·  Reboot: no  ·  Rollback: previous active plan GUID from timestamped backup."
+        (Get-POControl 'PreviewChange').Text = "$($plan.Change.Risk) RISK  |  $fromDisplay  ->  $($plan.TargetPowerPlanName)`nOnly selects an existing Windows scheme. No AC/DC values, processor limits, clocks, service state, registry, or BCD are changed.`nAdministrator: yes  |  Reboot: no  |  Rollback: previous active plan GUID from timestamped backup."
         (Get-POControl 'ApplyProfileButton').IsEnabled = $true
     }
     elseif ($profileId -in @('safe','custom')) {
@@ -292,11 +292,11 @@ function Show-POProfilePlan {
         (Get-POControl 'ApplyProfileButton').IsEnabled = $false
     }
     $messages = @($plan.Warnings) + @($plan.Skipped)
-    (Get-POControl 'PreviewWarnings').Text = if ($messages.Count) { $messages -join "`n• " } else { 'None. No unsupported, security-affecting, vendor-private, or reboot-required change is proposed.' }
-    (Get-POControl 'PreviewRecommendations').ItemsSource = @($plan.Recommendations | ForEach-Object { "• $($_.Name) — $($_.Description)" })
+    (Get-POControl 'PreviewWarnings').Text = if ($messages.Count) { $messages -join "`n- " } else { 'None. No unsupported, security-affecting, vendor-private, or reboot-required change is proposed.' }
+    (Get-POControl 'PreviewRecommendations').ItemsSource = @($plan.Recommendations | ForEach-Object { "- $($_.Name) - $($_.Description)" })
     (Get-POControl 'ApplyProfileButton').Content = if ((Get-POControl 'SimulationModeCheck').IsChecked) { 'Run simulation' } else { 'Apply reviewed profile' }
     (Get-POControl 'ApplyStatusText').Text = if ((Get-POControl 'SimulationModeCheck').IsChecked) { 'Simulation mode: no backup or Windows setting will be changed.' } else { 'Apply creates a timestamped local backup first; an apply or verification failure triggers rollback.' }
-    Set-POFooter 'Profile compatibility check complete · nothing applied' 'good'
+    Set-POFooter 'Profile compatibility check complete | nothing applied' 'good'
 }
 
 function Invoke-POApplyProfile {
@@ -362,21 +362,21 @@ function Update-POAdapterDetails {
     if (-not $selected) { (Get-POControl 'AdapterDetailsText').Text = 'No adapter selected.'; return }
     $ipv4DnsText = if ($selected.IPv4DnsReadable) { @($selected.IPv4DnsServers) -join ', ' } else { "Unknown; query failed: $($selected.IPv4DnsReadError)" }
     $ipv6DnsText = if ($selected.IPv6DnsReadable) { @($selected.IPv6DnsServers) -join ', ' } else { "Unknown; query failed: $($selected.IPv6DnsReadError)" }
-    $text = "Index $($selected.InterfaceIndex) · $($selected.Description)`nStatus $($selected.Status) · physical $($selected.HardwareInterface) · link $($selected.LinkSpeed) · DHCP $($selected.DhcpEnabled)`nIPv4: $(@($selected.IPv4Addresses) -join ', ')`nGateway: $(Format-POValue $selected.Gateway)`nDNS mode IPv4: $($selected.DnsConfigState) · $($selected.DnsConfigDetail)`nDNS IPv4: $ipv4DnsText`nDNS IPv6 (not changed): $ipv6DnsText"
+    $text = "Index $($selected.InterfaceIndex) | $($selected.Description)`nStatus $($selected.Status) | physical $($selected.HardwareInterface) | link $($selected.LinkSpeed) | DHCP $($selected.DhcpEnabled)`nIPv4: $(@($selected.IPv4Addresses) -join ', ')`nGateway: $(Format-POValue $selected.Gateway)`nDNS mode IPv4: $($selected.DnsConfigState) | $($selected.DnsConfigDetail)`nDNS IPv4: $ipv4DnsText`nDNS IPv6 (not changed): $ipv6DnsText"
     (Get-POControl 'AdapterDetailsText').Text = $text
 }
 
 function Invoke-POPingFromUi {
     $target = [string](Get-POControl 'PingHostBox').Text
-    (Get-POControl 'PingResultText').Text = 'Running ICMP test…'
+    (Get-POControl 'PingResultText').Text = 'Running ICMP test...'
     $yieldToUi = [System.Action] {}
     [void]$script:poWindow.Dispatcher.Invoke($yieldToUi, [System.Windows.Threading.DispatcherPriority]::Background)
     try {
         $result = Invoke-PONetworkPingTest -HostName $target -Count 4
-        $output = "Target: $($result.Target)`nReceived: $($result.Received)/$($result.Sent) · Packet loss: $($result.PacketLossPercent)%`nAverage: $(Format-POValue $result.AverageMs 'ms') · min $(Format-POValue $result.MinMs 'ms') · max $(Format-POValue $result.MaxMs 'ms')`n$($result.Note)"
+        $output = "Target: $($result.Target)`nReceived: $($result.Received)/$($result.Sent) | Packet loss: $($result.PacketLossPercent)%`nAverage: $(Format-POValue $result.AverageMs 'ms') | min $(Format-POValue $result.MinMs 'ms') | max $(Format-POValue $result.MaxMs 'ms')`n$($result.Note)"
         if ($result.Error) { $output += "`nError: $($result.Error)" }
         (Get-POControl 'PingResultText').Text = $output
-        Set-POFooter 'ICMP test complete · network path and server selection affect results' 'good'
+        Set-POFooter 'ICMP test complete | network path and server selection affect results' 'good'
     }
     catch { (Get-POControl 'PingResultText').Text = $_.Exception.Message; Set-POFooter $_.Exception.Message 'error' }
 }
@@ -398,9 +398,9 @@ function Invoke-POApplyDnsFromUi {
     $currentDns = Get-POCurrentAdapterDns -InterfaceIndex ([int]$selected.InterfaceIndex)
     $eligibility = Test-POAdapterDnsEligibility -AdapterState $currentDns
     if (-not $eligibility.Eligible) { Show-POMessage -Text ($eligibility.Reasons -join "`n") -Title 'DNS change blocked' -Icon Warning; return }
-    if ($provider -eq 'Automatic') { (Get-POControl 'DnsStatusText').Text = 'No change needed · this adapter already uses verified automatic/DHCP DNS.'; return }
+    if ($provider -eq 'Automatic') { (Get-POControl 'DnsStatusText').Text = 'No change needed | this adapter already uses verified automatic/DHCP DNS.'; return }
     $currentDnsText = @($currentDns.IPv4DnsServers) -join ', '
-    $beforeText = "Current IPv4 DNS: $currentDnsText · mode $($currentDns.DnsConfigState) · DHCP $($currentDns.DhcpEnabled)"
+    $beforeText = "Current IPv4 DNS: $currentDnsText | mode $($currentDns.DnsConfigState) | DHCP $($currentDns.DhcpEnabled)"
     $confirm = "Adapter: $($currentDns.InterfaceAlias) ($($currentDns.InterfaceDescription))`n$beforeText`nProvider: $dnsText`nOnly IPv4 DNS on this connected physical adapter will change, and only after DHCP plus automatic DNS mode are verified. IPv6, DHCP address assignment, other adapters, VPNs, and static/managed/unknown DNS configurations remain untouched.`nA timestamped backup is created first; failure triggers a verified reset to DHCP-provided DNS.`nThis may change name-resolution behavior, not game-server routing or in-game ping.`n`nContinue?"
     if (-not (Confirm-POAction -Text $confirm -Title 'Confirm DNS change')) { return }
     $expectedDnsServers = @($currentDns.IPv4DnsServers)
@@ -449,7 +449,7 @@ function Update-POSelectedBackup {
         if ($manifest) {
             foreach ($change in @($manifest.changes)) {
                 $resultDetail = if ($change.resultMessage) { "`n  $($change.resultMessage)" } else { '' }
-                $changes += "• $($change.name) — $($change.section) — status $($change.status) — $($change.timestampUtc)$resultDetail"
+                $changes += "- $($change.name) - $($change.section) - status $($change.status) - $($change.timestampUtc)$resultDetail"
             }
         }
         $details = "Backup: $($item.Id)`nStatus: $($item.Status)`nCreated: $($item.CreatedAt)`nRecorded changes: $($item.ChangeCount)`n" + ($changes -join "`n")
@@ -462,7 +462,7 @@ function Update-POSelectedBackup {
 function Refresh-POProfileCatalogUi {
     $rows = @()
     foreach ($profile in (Get-POProfiles)) {
-        $rows += "◆ $($profile.name)`n$($profile.description)`nRisk ceiling: $($profile.riskCeiling) · reboot: no profile change requires a reboot`nManual review: $(@($profile.manualRecommendations) -join ', ')`n$(@($profile.notes) -join ' ')"
+        $rows += "* $($profile.name)`n$($profile.description)`nRisk ceiling: $($profile.riskCeiling) | reboot: no profile change requires a reboot`nManual review: $(@($profile.manualRecommendations) -join ', ')`n$(@($profile.notes) -join ' ')"
     }
     (Get-POControl 'ProfilesList').ItemsSource = $rows
 }
@@ -473,7 +473,7 @@ function Refresh-POTweaksUi {
     foreach ($tweak in (Get-POTweakCatalog)) {
         $haystack = "$($tweak.name) $($tweak.category) $($tweak.description) $($tweak.purpose)"
         if (-not [string]::IsNullOrWhiteSpace($query) -and $haystack -notmatch [regex]::Escape($query)) { continue }
-        $rows += "[$($tweak.risk)] $($tweak.name)  ·  $($tweak.category)`nWHAT: $($tweak.description)`nWHY: $($tweak.purpose)`nEXPECTED: $($tweak.expectedBenefit)`nSUPPORTED: $(@($tweak.supportedVersions) -join ', ')  ·  ADMIN: $($tweak.requiresAdmin)  ·  REBOOT: $($tweak.requiresReboot)`nROLLBACK: $($tweak.rollbackMethod)`nSTATUS: $(if ($tweak.operation -eq 'OpenWindowsSettings') { 'User-controlled Windows Settings' } elseif ($tweak.operation -eq 'PreviewUserTempCleanup') { 'Manual and irreversible; never automatic' } else { 'Preview required' })"
+        $rows += "[$($tweak.risk)] $($tweak.name)  |  $($tweak.category)`nWHAT: $($tweak.description)`nWHY: $($tweak.purpose)`nEXPECTED: $($tweak.expectedBenefit)`nSUPPORTED: $(@($tweak.supportedVersions) -join ', ')  |  ADMIN: $($tweak.requiresAdmin)  |  REBOOT: $($tweak.requiresReboot)`nROLLBACK: $($tweak.rollbackMethod)`nSTATUS: $(if ($tweak.operation -eq 'OpenWindowsSettings') { 'User-controlled Windows Settings' } elseif ($tweak.operation -eq 'PreviewUserTempCleanup') { 'Manual and irreversible; never automatic' } else { 'Preview required' })"
     }
     (Get-POControl 'TweakCatalogList').ItemsSource = $rows
 }
@@ -484,7 +484,7 @@ function Refresh-POGames {
     $grid.ItemsSource = @(Get-POInstalledGames)
     $guidance = @()
     foreach ($game in (Get-POGameCatalog)) {
-        $guidance += "• $($game.name): $(@($game.focus) -join ' ' )"
+        $guidance += "- $($game.name): $(@($game.focus) -join ' ' )"
     }
     (Get-POControl 'GameGuidanceList').ItemsSource = $guidance
 }
@@ -522,7 +522,7 @@ function Refresh-POTasks {
 
 function Capture-POBenchmark {
     param([ValidateSet('before','after')][string]$Label)
-    (Get-POControl 'DiagnosticsOutput').Text = "Sampling for five seconds ($Label)…"
+    (Get-POControl 'DiagnosticsOutput').Text = "Sampling for five seconds ($Label)..."
     $yieldToUi = [System.Action] {}
     [void]$script:poWindow.Dispatcher.Invoke($yieldToUi, [System.Windows.Threading.DispatcherPriority]::Background)
     try {
@@ -538,7 +538,7 @@ function Capture-POBenchmark {
             $grid.ItemsSource = @($comparison.Metrics)
             (Get-POControl 'BenchmarkScoreText').Text = $comparison.GamingPerformanceScore
         }
-        Set-POFooter "$Label system sample captured · not a controlled in-game benchmark" 'good'
+        Set-POFooter "$Label system sample captured | not a controlled in-game benchmark" 'good'
     }
     catch { (Get-POControl 'DiagnosticsOutput').Text = $_.Exception.Message; Set-POFooter $_.Exception.Message 'error' }
 }
@@ -547,7 +547,7 @@ function Refresh-POBcdDiagnostics {
     $audit = Get-POBcdAudit
     $lines = @("BCD status: $($audit.Message)")
     foreach ($setting in @($audit.Settings)) {
-        $lines += "$($setting.Setting)  ·  current: $($setting.Current)  ·  default: $($setting.Default)  ·  recommendation: $($setting.Recommendation)"
+        $lines += "$($setting.Setting)  |  current: $($setting.Current)  |  default: $($setting.Default)  |  recommendation: $($setting.Recommendation)"
     }
     $lines += 'The optimizer does not write BCD values.'
     (Get-POControl 'DiagnosticsOutput').Text = $lines -join "`n"
@@ -591,7 +591,7 @@ foreach ($page in $navButtons) {
     (Get-POControl 'PreviewWarnings').Text = 'None'
     (Get-POControl 'PreviewRecommendations').ItemsSource = @()
     (Get-POControl 'ApplyProfileButton').IsEnabled = $false
-    Set-POFooter 'Preview cleared · no changes applied' 'normal'
+    Set-POFooter 'Preview cleared | no changes applied' 'normal'
 })
 (Get-POControl 'SimulationModeCheck').Add_Click({
     $button = Get-POControl 'ApplyProfileButton'
@@ -633,13 +633,13 @@ foreach ($page in $navButtons) {
     try {
         $script:poTempPreview = Get-POUserTempPreview -MinimumAgeDays 7
         $previewErrors = @($script:poTempPreview.Errors)
-        $previewStatus = "Preview: $($script:poTempPreview.FileCount) files · $([math]::Round($script:poTempPreview.TotalBytes / 1MB, 1)) MB · older than 7 days"
-        if ($script:poTempPreview.SkippedReparsePoints -gt 0) { $previewStatus += " · skipped $($script:poTempPreview.SkippedReparsePoints) reparse points" }
-        if ($previewErrors.Count -gt 0) { $previewStatus += " · INCOMPLETE ($($previewErrors.Count) inspection errors): $(@($previewErrors | Select-Object -First 3) -join '; ')" }
+        $previewStatus = "Preview: $($script:poTempPreview.FileCount) files | $([math]::Round($script:poTempPreview.TotalBytes / 1MB, 1)) MB | older than 7 days"
+        if ($script:poTempPreview.SkippedReparsePoints -gt 0) { $previewStatus += " | skipped $($script:poTempPreview.SkippedReparsePoints) reparse points" }
+        if ($previewErrors.Count -gt 0) { $previewStatus += " | INCOMPLETE ($($previewErrors.Count) inspection errors): $(@($previewErrors | Select-Object -First 3) -join '; ')" }
         (Get-POControl 'TempStatusText').Text = $previewStatus
         (Get-POControl 'CleanTempButton').IsEnabled = ($script:poTempPreview.FileCount -gt 0 -and $previewErrors.Count -eq 0)
-        if ($previewErrors.Count -gt 0) { Set-POFooter 'Temporary-file preview incomplete · cleanup disabled until a complete preview succeeds' 'warning' }
-        else { Set-POFooter 'Temporary-file preview ready · irreversible deletion is never automatic' 'warning' }
+        if ($previewErrors.Count -gt 0) { Set-POFooter 'Temporary-file preview incomplete | cleanup disabled until a complete preview succeeds' 'warning' }
+        else { Set-POFooter 'Temporary-file preview ready | irreversible deletion is never automatic' 'warning' }
     }
     catch { Show-POMessage -Text $_.Exception.Message -Title 'Cleanup preview refused' -Icon Warning }
 })
@@ -650,11 +650,11 @@ foreach ($page in $navButtons) {
         try {
             $result = Clear-POUserTemp -Preview $script:poTempPreview -Confirm:$false
             $cleanupErrors = @($result.Errors)
-            $cleanupStatus = "$($result.Status) · deleted $($result.Deleted); errors $($cleanupErrors.Count)"
+            $cleanupStatus = "$($result.Status) | deleted $($result.Deleted); errors $($cleanupErrors.Count)"
             if ($cleanupErrors.Count -gt 0) { $cleanupStatus += "`n" + (@($cleanupErrors | Select-Object -First 5) -join "`n") }
             (Get-POControl 'TempStatusText').Text = $cleanupStatus
             (Get-POControl 'CleanTempButton').IsEnabled = $false
-            Set-POFooter "Temporary cleanup: $($result.Status) · deleted $($result.Deleted); errors $($cleanupErrors.Count)" $(if ($cleanupErrors.Count -gt 0) { 'warning' } else { 'good' })
+            Set-POFooter "Temporary cleanup: $($result.Status) | deleted $($result.Deleted); errors $($cleanupErrors.Count)" $(if ($cleanupErrors.Count -gt 0) { 'warning' } else { 'good' })
         }
         catch { Show-POMessage -Text $_.Exception.Message -Title 'Cleanup failed' -Icon Error }
     }
@@ -717,7 +717,7 @@ foreach ($page in $navButtons) {
                 $cpu = Format-POValue $sample.CpuPercent '%'
                 $ram = Format-POValue $sample.AvailableMemoryGB 'GB available'
                 $disk = Format-POValue $sample.DiskActivePercent '% disk active'
-                (Get-POControl 'LiveSampleText').Text = "CPU  $cpu`nRAM  $ram`nDISK  $disk`nGPU  Not measured · PING  Run a test on demand`nSampled $($sample.SampledAtUtc)"
+                (Get-POControl 'LiveSampleText').Text = "CPU  $cpu`nRAM  $ram`nDISK  $disk`nGPU  Not measured | PING  Run a test on demand`nSampled $($sample.SampledAtUtc)"
             }
             catch { (Get-POControl 'LiveSampleText').Text = "Monitoring unavailable: $($_.Exception.Message)" }
         })
@@ -730,7 +730,7 @@ $script:poWindow.Add_Closing({ if ($script:poMonitorTimer) { $script:poMonitorTi
 # Show the window before the first hardware scan; page-specific inventories load only when requested.
 Update-POCustomDnsEnabled
 Set-POPage 'Home'
-Set-POFooter 'Window ready · loading the first read-only system snapshot…' 'normal'
+Set-POFooter 'Window ready | loading the first read-only system snapshot...' 'normal'
 $script:poStartupTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:poStartupTimer.Interval = [TimeSpan]::FromMilliseconds(120)
 $script:poStartupTimer.Add_Tick({
