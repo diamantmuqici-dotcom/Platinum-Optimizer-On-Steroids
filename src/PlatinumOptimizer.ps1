@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
-$script:POApplicationVersion = '2.0.1'
+$script:POApplicationVersion = '2.1.0'
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 
 $legacyModeSwitches = @()
@@ -32,11 +32,20 @@ if ($legacyModeSwitches.Count -eq 1) {
     $Mode = [string]$legacyModeSwitches[0]
 }
 
+# Every module the automatic pipeline can reach. The Network, Gaming and
+# Engine modules were dropped from this list in v2.0.1, which silently
+# disconnected those categories from the run: the modules were still present
+# in the repository but never imported, so the automatic engine could only
+# act on the power plan. All eight are imported here, and the BOOT stage
+# verifies each one is actually loaded before any change is attempted.
 $moduleFiles = @(
     'src\core\PlatinumOptimizer.Core.psm1',
     'src\core\PlatinumOptimizer.Power.psm1',
     'src\core\PlatinumOptimizer.Audio.psm1',
     'src\core\PlatinumOptimizer.Display.psm1',
+    'src\core\PlatinumOptimizer.Network.psm1',
+    'src\core\PlatinumOptimizer.Gaming.psm1',
+    'src\core\PlatinumOptimizer.Engine.psm1',
     'src\core\PlatinumOptimizer.Automatic.psm1'
 )
 try {
@@ -67,8 +76,8 @@ function Write-POConsoleBanner {
     Write-Host ''
     Write-Host '============================================================' -ForegroundColor DarkCyan
     Write-Host '       PLATINUM OPTIMIZER ON STEROIDS' -ForegroundColor Cyan
-    Write-Host '              AUTOMATIC MODE' -ForegroundColor Cyan
-    Write-Host '                    VERSION 2.0.1' -ForegroundColor Cyan
+    Write-Host '         AUTOMATIC GAMING OPTIMIZATION ENGINE' -ForegroundColor Cyan
+    Write-Host ('                    VERSION {0}' -f $script:POApplicationVersion) -ForegroundColor Cyan
     Write-Host '============================================================' -ForegroundColor DarkCyan
     Write-Host ''
 }

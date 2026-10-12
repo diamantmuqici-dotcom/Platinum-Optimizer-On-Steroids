@@ -1,6 +1,13 @@
 # Implementation report — CMD-only automatic optimizer
 
-Date: 2026-10-12 · Application version: 2.0.0
+Date: 2026-10-12 · Application version: **2.1.0**
+
+> **Update (v2.1.0).** The automatic engine was traced to a regression in
+> `src/PlatinumOptimizer.ps1` that left the Network, Gaming and Engine
+> modules unimported and therefore unreachable. All eight modules are now
+> wired into a twelve-stage pipeline with live stage-tagged output. Full
+> evidence in [`REGRESSION-AUDIT.md`](REGRESSION-AUDIT.md); the v2.0.0 text
+> below is retained for historical context.
 
 ## Delivered
 

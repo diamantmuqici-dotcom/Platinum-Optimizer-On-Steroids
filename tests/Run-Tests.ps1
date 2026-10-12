@@ -9,6 +9,12 @@ Import-Module -Name $modulePath -Global -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Power.psm1') -Global -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Audio.psm1') -Global -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Display.psm1') -Global -Force -ErrorAction Stop
+# Network, Gaming and Engine are part of the automatic pipeline again. They
+# were present in the repository but not imported by the entry point from
+# v2.0.1, which silently removed those categories from every run.
+Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Network.psm1') -Global -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Gaming.psm1') -Global -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Engine.psm1') -Global -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Automatic.psm1') -Global -Force -ErrorAction Stop
 $script:CoreModule = @(Get-Module | Where-Object { $_.Path -eq $modulePath } | Select-Object -First 1)[0]
 
@@ -518,7 +524,7 @@ try {
     Assert-POTest ($displayIssues.Count -eq 0) 'Every display profile gamma stays inside the safety bounds' ($displayIssues -join '; ')
     Assert-POTest ([bool]$displayCatalog.safety.neverWriteGpuRegistry) 'Display catalog declares that GPU registry values are never written'
 
-    $identity = Compute-POGammaRamp -Gamma 1.0
+    $identity = New-POGammaRamp -Gamma 1.0
     Assert-POTest ([int]$identity.Red[0] -eq 0 -and [int]$identity.Red[255] -eq 65535) 'Gamma ramp at 1.0 starts at 0 and ends at 65535'
     $identityMid = [int]$identity.Red[128]
     Assert-POTest ([math]::Abs($identityMid - 32896) -le 256) 'Gamma ramp at 1.0 is (close to) the identity curve'
@@ -527,10 +533,10 @@ try {
         if ([int]$identity.Red[$i] -ne [int]$identity.Green[$i] -or [int]$identity.Red[$i] -ne [int]$identity.Blue[$i]) { $channelsIdentical = $false; break }
     }
     Assert-POTest $channelsIdentical 'Gamma ramp is identical on all three channels (no tint / no green-shift path)'
-    $clamped = Compute-POGammaRamp -Gamma 5.0
+    $clamped = New-POGammaRamp -Gamma 5.0
     Assert-POTest ([double]$clamped.Gamma -le $gammaMax) 'Gamma input is clamped to the documented safety maximum'
-    $first = Compute-POGammaRamp -Gamma 1.08
-    $second = Compute-POGammaRamp -Gamma 1.08
+    $first = New-POGammaRamp -Gamma 1.08
+    $second = New-POGammaRamp -Gamma 1.08
     Assert-POTest ((ConvertTo-Json $first.Red -Compress) -eq (ConvertTo-Json $second.Red -Compress)) 'Gamma ramps are absolute: recomputing a profile never accumulates'
     $monotonic = $true
     for ($i = 1; $i -lt 256; $i++) { if ([int]$first.Red[$i] -lt [int]$first.Red[$i - 1]) { $monotonic = $false; break } }
@@ -636,6 +642,202 @@ try {
 }
 catch {
     Assert-POTest $false 'CMD-only architecture tests' $_.Exception.Message
+}
+
+# ---------------------------------------------------------------------------
+# Restored engine: every module reachable, every stage wired, no import warning
+# ---------------------------------------------------------------------------
+try {
+    $enginePath = Join-Path $repoRoot 'src\PlatinumOptimizer.ps1'
+    $engineEntryText = [System.IO.File]::ReadAllText($enginePath, [System.Text.Encoding]::UTF8)
+    $allModules = @('Core', 'Power', 'Audio', 'Display', 'Network', 'Gaming', 'Engine', 'Automatic')
+    $missingImports = @($allModules | Where-Object { -not $engineEntryText.Contains("PlatinumOptimizer.$_.psm1") })
+    Assert-POTest ($missingImports.Count -eq 0) 'Entry point imports every optimization module' ($missingImports -join ', ')
+
+    $loadedModules = @(Get-Module | Where-Object { $_.Name -like 'PlatinumOptimizer.*' } | ForEach-Object { $_.Name })
+    $missingLoaded = @($allModules | ForEach-Object { "PlatinumOptimizer.$_" } | Where-Object { $loadedModules -notcontains $_ })
+    Assert-POTest ($missingLoaded.Count -eq 0) 'Every optimization module loads in the test session' ($missingLoaded -join ', ')
+
+    # The v2.0.1 run printed "the names of some imported commands from the
+    # module 'PlatinumOptimizer.Display' include unapproved verbs". Check every
+    # exported noun-verb pair against Get-Verb instead of suppressing warnings.
+    $approvedVerbs = @(Get-Verb | ForEach-Object { $_.Verb })
+    $unapproved = New-Object System.Collections.Generic.List[string]
+    foreach ($moduleName in @($allModules | ForEach-Object { "PlatinumOptimizer.$_" })) {
+        $module = @(Get-Module | Where-Object { $_.Name -eq $moduleName } | Select-Object -First 1)
+        if ($module.Count -eq 0) { continue }
+        foreach ($exported in @($module[0].ExportedFunctions.Keys)) {
+            $verb = ($exported -split '-', 2)[0]
+            if ($approvedVerbs -notcontains $verb) { $unapproved.Add("$moduleName/$exported") }
+        }
+    }
+    Assert-POTest ($unapproved.Count -eq 0) 'No module exports a command with an unapproved verb' ($unapproved -join ', ')
+
+    $stages = @('Invoke-POBootStage', 'Invoke-POScanStage', 'Invoke-POBackupStage', 'Invoke-POCpuStage',
+        'Invoke-POPowerStage', 'Invoke-POGamingStage', 'Invoke-PONetworkStage', 'Invoke-POGpuStage',
+        'Invoke-PODisplayStage', 'Invoke-POAudioStage', 'Invoke-POMemoryStorageStage', 'Invoke-POVerifyStage')
+    $missingStages = @($stages | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
+    Assert-POTest ($missingStages.Count -eq 0) 'All optimization stages are exported by the engine' ($missingStages -join ', ')
+
+    $engineText = [System.IO.File]::ReadAllText((Join-Path $repoRoot 'src\core\PlatinumOptimizer.Engine.psm1'), [System.Text.Encoding]::UTF8)
+    $notInvoked = @($stages | Where-Object { -not $engineText.Contains($_) })
+    Assert-POTest ($notInvoked.Count -eq 0) 'The automatic pipeline invokes every stage' ($notInvoked -join ', ')
+    Assert-POTest (-not $engineText.Contains('Start-Sleep')) 'The engine never pads its runtime with artificial delays'
+}
+catch {
+    Assert-POTest $false 'Restored engine wiring tests' $_.Exception.Message
+}
+
+# ---------------------------------------------------------------------------
+# The optimization contract: Invoke-POConfigOperation classification.
+# Mocked handlers only - no system setting is read or written.
+# ---------------------------------------------------------------------------
+try {
+    $supported = { [pscustomobject]@{ Supported = $true; Reason = $null } }
+    $unsupported = { [pscustomobject]@{ Supported = $false; Reason = 'capability not exposed' } }
+    $readTen = { 10 }
+
+    # 1. Unsupported capability -> SKIPPED, never attempted.
+    $r = Invoke-POConfigOperation -Stage 'TEST' -Id 'unsupported' -Name 'Unsupported setting' `
+        -Detect $unsupported -Read $readTen -Evaluate { param($c) [pscustomobject]@{ Action = 'apply'; Target = 99 } }
+    Assert-POTest ($r.Status -eq 'SKIPPED') 'Unsupported capability is skipped, not applied' $r.Status
+    Assert-POTest (-not $r.Attempted) 'A skipped unsupported setting is not counted as attempted'
+
+    # 2. Already at the policy value -> ALREADY_OPTIMIZED.
+    $r = Invoke-POConfigOperation -Stage 'TEST' -Id 'noop' -Name 'Already correct' `
+        -Detect $supported -Read $readTen -Evaluate { param($c) [pscustomobject]@{ Action = 'noop'; Target = 10 } }
+    Assert-POTest ($r.Status -eq 'ALREADY_OPTIMIZED') 'A setting already at target is reported as already optimized' $r.Status
+    Assert-POTest (-not $r.Attempted) 'An already-optimized setting is not counted as a change'
+
+    # 3. Justified change, write verified -> APPLIED_VERIFIED with before/after.
+    $script:TestApplied = 0
+    $r = Invoke-POConfigOperation -Stage 'TEST' -Id 'applied' -Name 'Verifiable setting' `
+        -Detect $supported -Read $readTen `
+        -Evaluate { param($c) [pscustomobject]@{ Action = 'apply'; Target = 99; Justification = 'test'; Tradeoffs = 'none' } } `
+        -Apply { param($t) $script:TestApplied = $t } `
+        -Verify { param($t) [pscustomobject]@{ Verified = $true; Observed = $script:TestApplied } } `
+        -Rollback { param($c) $script:TestApplied = $c }
+    Assert-POTest ($r.Status -eq 'APPLIED_VERIFIED') 'A verified write is reported as applied and verified' $r.Status
+    Assert-POTest ($r.Attempted) 'A verified write is counted as attempted'
+    Assert-POTest ([string]$r.BeforeValue -eq '10' -and [string]$r.AfterValue -eq '99') 'Before and after values are captured' ("$($r.BeforeValue) -> $($r.AfterValue)")
+    Assert-POTest ($script:TestApplied -eq 99) 'The apply handler actually ran'
+
+    # 4. Write accepted but verification fails -> rollback, never success.
+    $script:TestApplied = 0
+    $r = Invoke-POConfigOperation -Stage 'TEST' -Id 'unverified' -Name 'Unverifiable setting' `
+        -Detect $supported -Read $readTen `
+        -Evaluate { param($c) [pscustomobject]@{ Action = 'apply'; Target = 99 } } `
+        -Apply { param($t) $script:TestApplied = $t } `
+        -Verify { param($t) [pscustomobject]@{ Verified = $false; Observed = $script:TestApplied } } `
+        -Rollback { param($c) $script:TestApplied = $c } -AllowRollback
+    Assert-POTest ($r.Status -eq 'ROLLED_BACK') 'An unverified write is rolled back, not reported as success' $r.Status
+    Assert-POTest ($script:TestApplied -eq 10) 'Rollback restored the previous value' $script:TestApplied
+
+    # 5. Write throws -> rollback, never success.
+    $script:TestApplied = 0
+    $r = Invoke-POConfigOperation -Stage 'TEST' -Id 'throwing' -Name 'Failing setting' `
+        -Detect $supported -Read $readTen `
+        -Evaluate { param($c) [pscustomobject]@{ Action = 'apply'; Target = 99 } } `
+        -Apply { param($t) throw 'simulated write failure' } `
+        -Verify { param($t) [pscustomobject]@{ Verified = $true; Observed = 99 } } `
+        -Rollback { param($c) $script:TestApplied = $c } -AllowRollback
+    Assert-POTest ($r.Status -eq 'ROLLED_BACK') 'A throwing write is rolled back' $r.Status
+    Assert-POTest ($script:TestApplied -eq 10) 'Rollback after a thrown write restored the previous value'
+
+    # 6. Backup-first policy blocks writes without a verified backup.
+    $script:TestApplied = 0
+    $r = Invoke-POConfigOperation -Stage 'TEST' -Id 'nobackup' -Name 'Protected setting' -RequiresBackup `
+        -Detect $supported -Read $readTen `
+        -Evaluate { param($c) [pscustomobject]@{ Action = 'apply'; Target = 99 } } `
+        -Apply { param($t) $script:TestApplied = $t } `
+        -Verify { param($t) [pscustomobject]@{ Verified = $true; Observed = 99 } }
+    Assert-POTest ($r.Status -eq 'SKIPPED') 'A write without a verified backup is blocked' $r.Status
+    Assert-POTest ($script:TestApplied -eq 0) 'No write handler ran when the backup was missing'
+
+    # 7. Diagnostic-only never writes.
+    $script:TestApplied = 0
+    $r = Invoke-POConfigOperation -Stage 'TEST' -Id 'diagnostic' -Name 'Inspected setting' -DiagnosticOnly `
+        -Detect $supported -Read $readTen `
+        -Evaluate { param($c) [pscustomobject]@{ Action = 'apply'; Target = 99 } } `
+        -Apply { param($t) $script:TestApplied = $t }
+    Assert-POTest ($r.Status -eq 'DIAGNOSTIC') 'A diagnostic-only setting is reported as diagnostic' $r.Status
+    Assert-POTest ($script:TestApplied -eq 0) 'A diagnostic-only setting is never written'
+}
+catch {
+    Assert-POTest $false 'Optimization contract tests' $_.Exception.Message
+}
+
+# ---------------------------------------------------------------------------
+# Truthful counting and live console output
+# ---------------------------------------------------------------------------
+try {
+    $rows = @(
+        (New-POResultRecord -Stage 'A' -Id '1' -Status 'APPLIED_VERIFIED' -Message 'applied'),
+        (New-POResultRecord -Stage 'A' -Id '2' -Status 'ALREADY_OPTIMIZED' -Message 'already'),
+        (New-POResultRecord -Stage 'A' -Id '3' -Status 'SKIPPED' -Message 'skipped'),
+        (New-POResultRecord -Stage 'A' -Id '4' -Status 'FAILED' -Message 'failed'),
+        (New-POResultRecord -Stage 'A' -Id '5' -Status 'UNVERIFIED' -Message 'unverified'),
+        (New-POResultRecord -Stage 'A' -Id '6' -Status 'ROLLED_BACK' -Message 'rolled back'),
+        (New-POResultRecord -Stage 'A' -Id '7' -Status 'DIAGNOSTIC' -Message 'diagnostic')
+    )
+    $summary = Get-POReportSummary -Results $rows
+    Assert-POTest ($summary.Applied -eq 1) 'Applied count is exact' $summary.Applied
+    Assert-POTest ($summary.AlreadyOptimized -eq 1) 'Already-optimized count is exact' $summary.AlreadyOptimized
+    Assert-POTest ($summary.Skipped -eq 1) 'Skipped count is exact' $summary.Skipped
+    Assert-POTest ($summary.Failed -eq 1) 'Failed count is exact and separate from success' $summary.Failed
+    Assert-POTest ($summary.Unverified -eq 1) 'Unverified count is exact and separate from success' $summary.Unverified
+    Assert-POTest ($summary.RolledBack -eq 1) 'Rolled-back count is exact' $summary.RolledBack
+    Assert-POTest ($summary.DiagnosticOnly -eq 1) 'Diagnostic-only count is exact' $summary.DiagnosticOnly
+    Assert-POTest ($summary.FailedIds.Count -eq 1 -and $summary.UnverifiedIds.Count -eq 1) 'Failures and unverified operations are listed by id'
+
+    # Live console output: timestamped, stage tagged, mirrored to the log file
+    # without buffering until the end.
+    $logTestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("PO_ConsoleTest_" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $logTestRoot -Force | Out-Null
+    try {
+        $logFile = Join-Path $logTestRoot 'run.log'
+        Set-Content -LiteralPath $logFile -Value 'header' -Encoding UTF8
+        $previousLog = $script:PORunLogPath
+        $script:PORunLogPath = $logFile
+        try {
+            Set-POConsoleStage -Name 'CPU'
+            Write-POConsole -Level 'INFO' -Message 'reading minimum processor state'
+            Write-POConsole -Level 'PASS' -Message 'minimum processor state verified'
+            $content = [System.IO.File]::ReadAllText($logFile, [System.Text.Encoding]::UTF8)
+            Assert-POTest ($content -match '\[CPU\] reading minimum processor state') 'Live output is tagged with the executing stage'
+            Assert-POTest ($content -match '\[CPU\] \[PASS\] minimum processor state verified') 'Result lines carry a readable status label'
+            Assert-POTest ($content -match '\d{2}:\d{2}:\d{2}') 'Live output lines are timestamped'
+        }
+        finally { $script:PORunLogPath = $previousLog }
+    }
+    finally { Remove-Item -LiteralPath $logTestRoot -Recurse -Force -ErrorAction SilentlyContinue }
+}
+catch {
+    Assert-POTest $false 'Truthful counting and live output tests' $_.Exception.Message
+}
+
+# ---------------------------------------------------------------------------
+# Restored backup helper (Add-POBackupFile) round trip
+# ---------------------------------------------------------------------------
+try {
+    $backupTestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("PO_BackupFileTest_" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $backupTestRoot -Force | Out-Null
+    try {
+        $manifest = [pscustomobject]@{ schemaVersion = 1; id = 'test'; status = 'VALID'; files = @() }
+        Write-POJsonAtomic -Path (Join-Path $backupTestRoot 'manifest.json') -Object $manifest
+        $added = Add-POBackupFile -BackupPath $backupTestRoot -RelativePath 'network\tcp-global-before.json' -Content '{"Available":true}'
+        Assert-POTest (Test-Path -LiteralPath $added.Path -PathType Leaf) 'Add-POBackupFile writes the before-state file'
+        $updated = Get-Content -LiteralPath (Join-Path $backupTestRoot 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        Assert-POTest (@($updated.files).Count -eq 1) 'Add-POBackupFile registers the file in the manifest inventory'
+        Assert-POTest (@($updated.files)[0].SHA256 -match '^[0-9A-Fa-f]{64}$') 'Add-POBackupFile records a SHA256 checksum'
+        $threw = $false
+        try { Add-POBackupFile -BackupPath $backupTestRoot -RelativePath 'C:\windows\evil.json' -Content 'x' } catch { $threw = $true }
+        Assert-POTest $threw 'Add-POBackupFile rejects rooted paths outside the backup'
+    }
+    finally { Remove-Item -LiteralPath $backupTestRoot -Recurse -Force -ErrorAction SilentlyContinue }
+}
+catch {
+    Assert-POTest $false 'Backup helper tests' $_.Exception.Message
 }
 
 Write-Host ''
