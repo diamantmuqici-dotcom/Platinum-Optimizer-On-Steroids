@@ -503,7 +503,7 @@ function Set-PODisplayRampInternal {
             throw "The gamma ramp was written but could not be read back for $DeviceName; treating as unverified."
         }
         if (-not (Compare-POGammaRamps -Expected $ChannelValues -Actual ([int[]]@($readback.Red)))) {
-            throw "Gamma verification failed for $DeviceName: the driver did not keep the requested ramp. This usually means HDR or driver color management is overriding it. No verified change was made."
+            throw "Gamma verification failed for $($DeviceName): the driver did not keep the requested ramp. This usually means HDR or driver color management is overriding it. No verified change was made."
         }
     }
     finally {
@@ -644,7 +644,7 @@ function Invoke-PODisplayProfile {
         return [pscustomobject][ordered]@{
             Status = 'APPLIED_VERIFIED'
             ProfileId = $ProfileId
-            Message = "Verified on $DeviceName: $($describe -join '; '). Scope reminder: $($profile.scope)"
+            Message = "Verified on $($DeviceName): $($describe -join '; '). Scope reminder: $($profile.scope)"
             Guidance = [string]$profile.vibranceGuidance
             Tradeoffs = @($profile.tradeoffs)
             Backup = $backup
