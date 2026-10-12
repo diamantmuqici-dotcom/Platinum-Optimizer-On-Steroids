@@ -99,6 +99,25 @@ class CliContractTests(unittest.TestCase):
         ):
             self.assertNotIn(token, automatic)
 
+    def test_power_plan_creation_uses_powercfgs_documented_rename_verb(self) -> None:
+        power = (ROOT / "src/core/PlatinumOptimizer.Power.psm1").read_text(encoding="utf-8")
+        start = power.index("function New-POPlatinumPlan")
+        end = power.index("function Invoke-POPlatinumPresetValues", start)
+        create_plan = power[start:end]
+        self.assertIn("-Arguments @('/changename', $newGuid, $name", create_plan)
+        self.assertNotIn("'/setname'", create_plan)
+
+    def test_automatic_report_schema_predeclares_all_late_written_fields(self) -> None:
+        automatic = (ROOT / "src/core/PlatinumOptimizer.Automatic.psm1").read_text(encoding="utf-8")
+        start = automatic.index("function New-POAutomaticRunContext")
+        end = automatic.index("function Write-POAutomaticEvent", start)
+        context = automatic[start:end]
+        report_start = context.index("Report = [pscustomobject][ordered]@{")
+        report_end = context.index("\n        }", report_start)
+        report = context[report_start:report_end]
+        for field in ("status", "summaryText", "metrics"):
+            self.assertRegex(report, rf"(?m)^\s+{field}\s*=")
+
     def test_windows_process_arguments_are_quoted_without_literal_escape_slashes(self) -> None:
         core = (ROOT / "src/core/PlatinumOptimizer.Core.psm1").read_text(encoding="utf-8")
         quote = chr(34)
