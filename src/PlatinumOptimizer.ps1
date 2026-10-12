@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
-$script:POApplicationVersion = '2.0.0'
+$script:POApplicationVersion = '2.0.1'
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 
 $legacyModeSwitches = @()
@@ -68,7 +68,7 @@ function Write-POConsoleBanner {
     Write-Host '============================================================' -ForegroundColor DarkCyan
     Write-Host '       PLATINUM OPTIMIZER ON STEROIDS' -ForegroundColor Cyan
     Write-Host '              AUTOMATIC MODE' -ForegroundColor Cyan
-    Write-Host '                    VERSION 2.0.0' -ForegroundColor Cyan
+    Write-Host '                    VERSION 2.0.1' -ForegroundColor Cyan
     Write-Host '============================================================' -ForegroundColor DarkCyan
     Write-Host ''
 }

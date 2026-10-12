@@ -432,10 +432,15 @@ function New-POPlatinumPlan {
     $newGuid = $guidMatch.Groups[1].Value.ToLowerInvariant()
     $verifyList = @(ConvertFrom-POPowerPlanListLines -Lines (Invoke-POPowercfg -Arguments @('/list')).Output)
     if (@($verifyList | Where-Object { $_.Guid -eq $newGuid }).Count -eq 0) { throw "The duplicated plan GUID $newGuid was not found in the power scheme list; the plan was not adopted." }
-    $setName = Invoke-POPowercfg -Arguments @('/setname', $newGuid, $name, [string]$catalog.planDescription)
-    if ($setName.ExitCode -ne 0) {
+    # powercfg's documented plan-rename verb is /changename (not /setname).
+    # Rename the duplicate before adopting it; on failure, remove only this
+    # newly-created duplicate and keep every pre-existing plan untouched.
+    $renameResult = Invoke-POPowercfg -Arguments @('/changename', $newGuid, $name, [string]$catalog.planDescription)
+    if ($renameResult.ExitCode -ne 0) {
         [void](Invoke-POPowercfg -Arguments @('/delete', $newGuid))
-        throw "powercfg /setname failed with exit code $($setName.ExitCode); the unnamed duplicate was removed."
+        $renameDetails = (@($renameResult.Output) -join ' ').Trim()
+        $renameDetailText = if ($renameDetails) { ": $renameDetails" } else { '' }
+        throw "powercfg /changename failed with exit code $($renameResult.ExitCode)$renameDetailText; the unnamed duplicate was removed."
     }
     $verifyNamed = @(ConvertFrom-POPowerPlanListLines -Lines (Invoke-POPowercfg -Arguments @('/list')).Output)
     if (@($verifyNamed | Where-Object { $_.Guid -eq $newGuid -and $_.Name -eq $name }).Count -eq 0) {

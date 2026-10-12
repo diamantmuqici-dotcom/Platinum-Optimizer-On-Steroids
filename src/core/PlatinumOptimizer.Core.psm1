@@ -1637,7 +1637,7 @@ function New-POBackup {
         id = Split-Path -Leaf $backupPath
         createdAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
         createdAtUtc = [DateTime]::UtcNow.ToString('o')
-        applicationVersion = '2.0.0'
+        applicationVersion = '2.0.1'
         status = 'VALID'
         modifiedSections = @()
         changes = @()

@@ -1,5 +1,5 @@
 #requires -Version 5.1
-# Platinum Optimizer - Automatic CMD Engine (v2.0)
+# Platinum Optimizer - Automatic CMD Engine (v2.0.1)
 # The console is the entire user interface. This module runs the complete
 # optimization pipeline without interactive menus: preflight, detection,
 # restore point, backup, power, CPU, gaming, GPU/display, network, storage,
@@ -11,7 +11,7 @@ if (-not (Get-Module | Where-Object { $_.Name -eq 'PlatinumOptimizer.Core' })) {
     Import-Module -Name (Join-Path $PSScriptRoot 'PlatinumOptimizer.Core.psm1') -Global -Force -ErrorAction Stop
 }
 
-$script:POEngineVersion = '2.0.0'
+$script:POEngineVersion = '2.0.1'
 $script:PORunLogPath = $null
 
 function Get-POEngineVersion { return $script:POEngineVersion }

@@ -314,6 +314,11 @@ catch {
 # These are pure logic/structure tests and run on any host.
 try {
     $powerCatalog = Get-Content -LiteralPath (Join-Path $repoRoot 'src\data\power-settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $powerModuleSource = Get-Content -LiteralPath (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Power.psm1') -Raw -Encoding UTF8
+    $planCreationStart = $powerModuleSource.IndexOf('function New-POPlatinumPlan')
+    $planCreationEnd = $powerModuleSource.IndexOf('function Invoke-POPlatinumPresetValues', $planCreationStart)
+    $planCreationSource = $powerModuleSource.Substring($planCreationStart, $planCreationEnd - $planCreationStart)
+    Assert-POTest ($planCreationSource.Contains("-Arguments @('/changename'") -and -not $planCreationSource.Contains("'/setname'")) 'New power plans use powercfg /changename to assign their name'
     Assert-POTest ($powerCatalog.planName -eq 'Platinum On Steroids') 'Power catalog defines the exact Platinum On Steroids plan name'
     Assert-POTest ($powerCatalog.duplicateBaseScheme -eq 'balanced') 'Balanced is the safe fallback scheme when the active plan cannot be read'
     $guidPattern = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -430,6 +435,36 @@ try {
 }
 catch {
     Assert-POTest $false 'Automatic CLI helper tests' $_.Exception.Message
+}
+
+if (Test-POIsWindows) {
+    $reportTestContext = $null
+    $originalRunLogPath = $null
+    $reportTestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('PlatinumOptimizerReportTests_' + [guid]::NewGuid().ToString('N'))
+    try {
+        $reportTestContext = New-POAutomaticRunContext -Mode Auto -ApplicationVersion 'test'
+        $originalRunLogPath = $reportTestContext.LogPath
+        New-Item -ItemType Directory -Path $reportTestRoot -Force | Out-Null
+        $reportTestContext.LogPath = Join-Path $reportTestRoot 'run.log'
+        $reportTestContext.ReportPath = Join-Path $reportTestRoot 'run.json'
+        $reportTestContext.Report.logPath = $reportTestContext.LogPath
+        $reportTestContext.Report.reportPath = $reportTestContext.ReportPath
+        Save-POAutomaticReport -Context $reportTestContext -OverallStatus 'ABORTED_WITH_FAILURE' -Summary 'Regression test failure status.'
+        $savedReport = Get-Content -LiteralPath $reportTestContext.ReportPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        Assert-POTest ($savedReport.status -eq 'ABORTED_WITH_FAILURE') 'Automatic JSON report saves the final status'
+        Assert-POTest ($savedReport.summaryText -eq 'Regression test failure status.') 'Automatic JSON report saves its summary text'
+        Assert-POTest ($null -ne $savedReport.PSObject.Properties['metrics']) 'Automatic JSON report schema includes optional diagnostic metrics'
+    }
+    catch {
+        Assert-POTest $false 'Automatic JSON report regression test' $_.Exception.Message
+    }
+    finally {
+        if ($originalRunLogPath -and (Test-Path -LiteralPath $originalRunLogPath -PathType Leaf)) { Remove-Item -LiteralPath $originalRunLogPath -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $reportTestRoot -PathType Container) { Remove-Item -LiteralPath $reportTestRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+else {
+    Skip-POTest 'Automatic JSON report regression test' 'Windows state paths are unavailable on this host.'
 }
 
 try {

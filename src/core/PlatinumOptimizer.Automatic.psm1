@@ -4,7 +4,7 @@
 # read-only; the automatic writer is the verified Platinum power-plan path.
 Set-StrictMode -Version 2.0
 
-$script:POAutomaticModuleVersion = '2.0.0'
+$script:POAutomaticModuleVersion = '2.0.1'
 
 function Get-POAutomaticPropertyValue {
     [CmdletBinding()]
@@ -62,6 +62,7 @@ function New-POAutomaticRunContext {
             applicationVersion = $ApplicationVersion
             runId = $runId
             mode = $Mode
+            status = 'RUNNING'
             startedAtUtc = $started.ToString('o')
             endedAtUtc = $null
             durationSeconds = $null
@@ -69,11 +70,13 @@ function New-POAutomaticRunContext {
             windowsPowerShellVersion = [string]$PSVersionTable.PSVersion
             system = $null
             assessment = $null
+            metrics = $null
             restorePoint = $null
             backup = $null
             recoverySource = $null
             changes = $null
             summary = $null
+            summaryText = $null
             recommendations = @()
             logWriteError = $null
             rebootRecommended = $false
