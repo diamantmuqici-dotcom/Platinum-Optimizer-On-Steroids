@@ -5,7 +5,7 @@ Date: 2026-10-12 · Application version: 2.0.0
 ## Delivered
 
 - Replaced the WPF/XAML dashboard entry point with a console-only PowerShell engine and a small CMD launcher. The old compatibility `.cmd` now delegates to the new launcher; the archived V9.3 command list remains non-executable text.
-- Added Windows UAC handoff for automatic/recovery modes, validated command-line modes (`--scan`, `--benchmark`, `--restore`, `--self-test`), safe repository-relative paths, visible foreground execution, meaningful exit codes, and a final keypress wait.
+- Added Windows UAC handoff for automatic/recovery modes, validated command-line modes (`--scan`, `--benchmark`, `--restore`, `--self-test`), safe repository-relative paths, visible foreground execution, meaningful exit codes, and a final keypress wait. Elevation is checked from the Windows security token rather than `net session` (which can fail when the Server service is disabled), and the launcher elevates Windows PowerShell with a quoted script path instead of trying to execute the `.bat` through `Start-Process`.
 - Added a console assessment covering Windows/hardware, power schemes/processor settings, adapters/TCP state, display/audio, gaming settings, security, storage, reboot indicators, and aggregate resource counters. Optional data remains unknown when Windows does not expose it.
 - Reworked the power workflow so its checksum-verified application backup is created **before** any system change, including the optional System Restore point. The previous active plan must export successfully. An existing Platinum scheme is also exported and its documented processor values are captured for rollback.
 - The automatic plan is cloned from the active plan (Balanced fallback), reused by exact name, configured only with conservative documented processor values, and activated only after GUID read-back. Core parking, boost, network, capture, display, services, startup, storage, security, and undocumented registry settings remain unchanged.
@@ -21,7 +21,7 @@ This workspace is not Windows. PowerShell system changes, UAC, System Restore, `
 | PowerShell structural sanity scan | Passed for launcher, engine, all PowerShell modules, and Windows test harness |
 | Tree-sitter PowerShell grammar check | Passed; parser noted documented grammar quirks in existing Core/test constructs |
 | JSON catalogs parse | Passed; all 7 data catalogs parsed |
-| Python CLI/repository contract tests | Passed; 12 tests |
+| Python CLI/repository contract tests | Passed; 13 tests |
 | Windows PowerShell test harness (`tests/Run-Tests.ps1`) | Authored but not executed; Windows PowerShell is unavailable here |
 | Live Windows integration | Not performed; no Windows host, UAC, `powercfg`, WMI/CIM, or Windows APIs are available |
 

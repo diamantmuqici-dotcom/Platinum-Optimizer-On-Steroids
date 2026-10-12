@@ -47,7 +47,7 @@ function Test-POIsAdministrator {
     if (-not (Test-POIsWindows)) { return $false }
     try {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        $principal = [Security.Principal.WindowsPrincipal]::new($identity)
         return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     }
     catch { return $false }

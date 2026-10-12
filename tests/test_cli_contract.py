@@ -25,9 +25,24 @@ class CliContractTests(unittest.TestCase):
     def test_uac_handoff_is_visible_and_waited(self) -> None:
         launcher = (ROOT / "src/Launcher.ps1").read_text(encoding="utf-8")
         self.assertIn("ValidateSet('Auto', 'Scan', 'Benchmark', 'Restore', 'SelfTest')", launcher)
+        self.assertIn("WindowsPrincipal", launcher)
         self.assertIn("-Verb RunAs", launcher)
         self.assertIn("-Wait -PassThru", launcher)
         self.assertIn("exit ([int]$child.ExitCode)", launcher)
+
+    def test_launcher_does_not_use_net_session_or_elevate_the_batch_file(self) -> None:
+        batch = (ROOT / "PlatinumOptimizer.bat").read_text(encoding="ascii").lower()
+        launcher = (ROOT / "src/Launcher.ps1").read_text(encoding="utf-8")
+        # `net session` can fail for an already elevated user when the Server
+        # service is disabled. Re-launching a .bat through ShellExecute also
+        # makes quoting/exit-code handling unreliable. Check elevation from
+        # the Windows token and elevate Windows PowerShell itself instead.
+        self.assertNotIn("net session", batch)
+        self.assertNotIn("start-process", batch)
+        self.assertIn("WindowsPrincipal", launcher)
+        self.assertIn("-FilePath $powershellPath", launcher)
+        self.assertIn("$quotedLauncherPath", launcher)
+        self.assertNotIn("-FilePath $launcherPath", launcher)
 
     def test_no_graphical_entry_point_or_xaml_remains(self) -> None:
         self.assertFalse((ROOT / "src/ui/MainWindow.xaml").exists())
