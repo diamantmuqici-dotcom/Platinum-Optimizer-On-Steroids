@@ -484,7 +484,19 @@ function Get-PODisplayRampInternal {
 
 function Set-PODisplayRampInternal {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$DeviceName, [Parameter(Mandatory = $true)][int[]]$ChannelValues)
+    param(
+        [Parameter(Mandatory = $true)][string]$DeviceName,
+        [Parameter(Mandatory = $true)][int[]]$ChannelValues,
+        [AllowNull()][int[]]$GreenValues = $null,
+        [AllowNull()][int[]]$BlueValues = $null
+    )
+    $redValues = [int[]]$ChannelValues
+    if ($null -eq $GreenValues) { $GreenValues = $redValues }
+    if ($null -eq $BlueValues) { $BlueValues = $redValues }
+    if ($redValues.Count -ne 256 -or $GreenValues.Count -ne 256 -or $BlueValues.Count -ne 256) { throw 'A gamma ramp must contain exactly 256 entries per color channel.' }
+    foreach ($value in $redValues) { if ($value -lt 0 -or $value -gt 65535) { throw 'Gamma ramp entries must be in the documented unsigned 16-bit range.' } }
+    foreach ($value in $GreenValues) { if ($value -lt 0 -or $value -gt 65535) { throw 'Gamma ramp entries must be in the documented unsigned 16-bit range.' } }
+    foreach ($value in $BlueValues) { if ($value -lt 0 -or $value -gt 65535) { throw 'Gamma ramp entries must be in the documented unsigned 16-bit range.' } }
     Initialize-PODisplayNative
     $hdc = [PlatinumOptimizer.Display.Native]::CreateDCW($null, $DeviceName, $null, [IntPtr]::Zero)
     $created = $true
@@ -492,9 +504,9 @@ function Set-PODisplayRampInternal {
     if ($hdc -eq [IntPtr]::Zero) { throw "A device context for $DeviceName could not be opened; gamma cannot be changed." }
     try {
         $ramp = New-Object PlatinumOptimizer.Display.GAMMARAMP
-        $ramp.Red = [uint16[]]@($ChannelValues | ForEach-Object { [uint16]$_ })
-        $ramp.Green = [uint16[]]@($ChannelValues | ForEach-Object { [uint16]$_ })
-        $ramp.Blue = [uint16[]]@($ChannelValues | ForEach-Object { [uint16]$_ })
+        $ramp.Red = [uint16[]]@($redValues | ForEach-Object { [uint16]$_ })
+        $ramp.Green = [uint16[]]@($GreenValues | ForEach-Object { [uint16]$_ })
+        $ramp.Blue = [uint16[]]@($BlueValues | ForEach-Object { [uint16]$_ })
         if (-not [PlatinumOptimizer.Display.Native]::SetDeviceGammaRamp($hdc, [ref]$ramp)) {
             throw "The display driver refused SetDeviceGammaRamp for $DeviceName (common when HDR is enabled or the driver owns the ramp)."
         }
@@ -502,8 +514,11 @@ function Set-PODisplayRampInternal {
         if (-not [PlatinumOptimizer.Display.Native]::GetDeviceGammaRamp($hdc, [ref]$readback)) {
             throw "The gamma ramp was written but could not be read back for $DeviceName; treating as unverified."
         }
-        if (-not (Compare-POGammaRamps -Expected $ChannelValues -Actual ([int[]]@($readback.Red)))) {
-            throw "Gamma verification failed for $($DeviceName): the driver did not keep the requested ramp. This usually means HDR or driver color management is overriding it. No verified change was made."
+        $redVerified = Compare-POGammaRamps -Expected $redValues -Actual ([int[]]@($readback.Red))
+        $greenVerified = Compare-POGammaRamps -Expected $GreenValues -Actual ([int[]]@($readback.Green))
+        $blueVerified = Compare-POGammaRamps -Expected $BlueValues -Actual ([int[]]@($readback.Blue))
+        if (-not ($redVerified -and $greenVerified -and $blueVerified)) {
+            throw "Gamma verification failed for $($DeviceName): the driver did not keep all requested color channels. This usually means HDR or driver color management is overriding it."
         }
     }
     finally {
@@ -534,6 +549,31 @@ function Set-PODisplayModeInternal {
     $flags = if ($TestOnly) { [PlatinumOptimizer.Display.Native]::CDS_TEST } else { [PlatinumOptimizer.Display.Native]::CDS_UPDATEREGISTRY }
     $result = [PlatinumOptimizer.Display.Native]::ChangeDisplaySettingsExW($DeviceName, [ref]$mode, [IntPtr]::Zero, $flags, [IntPtr]::Zero)
     return [int]$result
+}
+
+function Get-PODisplayLiveStateSnapshot {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string[]]$DeviceNames)
+    if (-not (Test-POIsWindows)) { throw 'A live display safety snapshot is available only on Windows.' }
+    $uniqueNames = @($DeviceNames | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    if ($uniqueNames.Count -eq 0) { throw 'No display device names were supplied for the safety snapshot.' }
+    $entries = @()
+    foreach ($deviceName in $uniqueNames) {
+        $mode = Get-POCurrentDisplayModeInternal -DeviceName $deviceName
+        $ramp = Get-PODisplayRampInternal -DeviceName $deviceName
+        $entries += [pscustomobject][ordered]@{
+            DeviceName = $deviceName
+            CapturedAtUtc = [DateTime]::UtcNow.ToString('o')
+            Mode = $mode
+            GammaRamp = $ramp
+        }
+    }
+    return [pscustomobject][ordered]@{
+        Devices = $entries
+        AppliedProfileId = $null
+        AppliedAtUtc = $null
+        SnapshotPurpose = 'Live display state immediately before backup recovery'
+    }
 }
 
 function Get-PODisplayDeviceState {
@@ -672,14 +712,15 @@ function Restore-PODisplayConfiguration {
     }
     $mode = $entry.Mode
     $ramp = $entry.GammaRamp
-    if ($ramp -and $ramp.Red) { Set-PODisplayRampInternal -DeviceName $DeviceName -ChannelValues ([int[]]@($ramp.Red)) }
+    if ($null -eq $ramp -or -not $ramp.Red -or -not $ramp.Green -or -not $ramp.Blue) { throw 'The captured original RGB gamma ramp is missing or incomplete; display restore was blocked.' }
     $testResult = Set-PODisplayModeInternal -DeviceName $DeviceName -Width ([int]$mode.PelsWidth) -Height ([int]$mode.PelsHeight) -BitsPerPel ([int]$mode.BitsPerPel) -Frequency ([int]$mode.DisplayFrequency) -TestOnly
-    if ($testResult -eq [PlatinumOptimizer.Display.Native]::DISP_CHANGE_SUCCESSFUL) {
-        [void](Set-PODisplayModeInternal -DeviceName $DeviceName -Width ([int]$mode.PelsWidth) -Height ([int]$mode.PelsHeight) -BitsPerPel ([int]$mode.BitsPerPel) -Frequency ([int]$mode.DisplayFrequency))
-        $verify = Get-POCurrentDisplayModeInternal -DeviceName $DeviceName
-        if ([int]$verify.DisplayFrequency -ne [int]$mode.DisplayFrequency -or [int]$verify.PelsWidth -ne [int]$mode.PelsWidth -or [int]$verify.PelsHeight -ne [int]$mode.PelsHeight) {
-            throw "Display restore verification failed for $DeviceName; the captured mode could not be confirmed."
-        }
+    if ($testResult -ne [PlatinumOptimizer.Display.Native]::DISP_CHANGE_SUCCESSFUL) { throw "Windows rejected the captured display mode for $DeviceName (result $testResult); the mode was not changed." }
+    Set-PODisplayRampInternal -DeviceName $DeviceName -ChannelValues ([int[]]@($ramp.Red)) -GreenValues ([int[]]@($ramp.Green)) -BlueValues ([int[]]@($ramp.Blue))
+    $applyResult = Set-PODisplayModeInternal -DeviceName $DeviceName -Width ([int]$mode.PelsWidth) -Height ([int]$mode.PelsHeight) -BitsPerPel ([int]$mode.BitsPerPel) -Frequency ([int]$mode.DisplayFrequency)
+    if ($applyResult -ne [PlatinumOptimizer.Display.Native]::DISP_CHANGE_SUCCESSFUL) { throw "Windows failed to apply the captured display mode for $DeviceName (result $applyResult)." }
+    $verify = Get-POCurrentDisplayModeInternal -DeviceName $DeviceName
+    if ([int]$verify.DisplayFrequency -ne [int]$mode.DisplayFrequency -or [int]$verify.PelsWidth -ne [int]$mode.PelsWidth -or [int]$verify.PelsHeight -ne [int]$mode.PelsHeight -or [int]$verify.BitsPerPel -ne [int]$mode.BitsPerPel) {
+        throw "Display restore verification failed for $DeviceName; the captured mode could not be confirmed."
     }
     $state = Get-PODisplayModuleState
     if ($state -and $state.Devices) {
@@ -705,13 +746,38 @@ function Restore-PODisplaySection {
     $entry = $entry[0]
     $mode = $entry.Mode
     $ramp = $entry.GammaRamp
-    if ($ramp -and $ramp.Red) { Set-PODisplayRampInternal -DeviceName $deviceName -ChannelValues ([int[]]@($ramp.Red)) }
-    $testResult = Set-PODisplayModeInternal -DeviceName $deviceName -Width ([int]$mode.PelsWidth) -Height ([int]$mode.PelsHeight) -BitsPerPel ([int]$mode.BitsPerPel) -Frequency ([int]$mode.DisplayFrequency) -TestOnly
-    if ($testResult -eq [PlatinumOptimizer.Display.Native]::DISP_CHANGE_SUCCESSFUL) {
-        [void](Set-PODisplayModeInternal -DeviceName $deviceName -Width ([int]$mode.PelsWidth) -Height ([int]$mode.PelsHeight) -BitsPerPel ([int]$mode.BitsPerPel) -Frequency ([int]$mode.DisplayFrequency))
-        $verify = Get-POCurrentDisplayModeInternal -DeviceName $deviceName
-        if ([int]$verify.DisplayFrequency -ne [int]$mode.DisplayFrequency) { throw "Display restore verification failed for $deviceName." }
+    if ($null -eq $ramp -or -not $ramp.Red -or -not $ramp.Green -or -not $ramp.Blue) { throw 'The captured original RGB gamma ramp is missing or incomplete; display restore was blocked.' }
+    if ($ramp.Red.Count -ne 256 -or $ramp.Green.Count -ne 256 -or $ramp.Blue.Count -ne 256) { throw 'The captured original RGB gamma ramp is incomplete; display restore was blocked.' }
+    $currentMode = Get-POCurrentDisplayModeInternal -DeviceName $deviceName
+    $currentRamp = Get-PODisplayRampInternal -DeviceName $deviceName
+    $modeAlreadyOriginal = ([int]$currentMode.PelsWidth -eq [int]$mode.PelsWidth -and [int]$currentMode.PelsHeight -eq [int]$mode.PelsHeight -and [int]$currentMode.BitsPerPel -eq [int]$mode.BitsPerPel -and [int]$currentMode.DisplayFrequency -eq [int]$mode.DisplayFrequency)
+    $rampAlreadyOriginal = (Compare-POGammaRamps -Expected ([int[]]@($ramp.Red)) -Actual ([int[]]@($currentRamp.Red)) -Tolerance 512) -and (Compare-POGammaRamps -Expected ([int[]]@($ramp.Green)) -Actual ([int[]]@($currentRamp.Green)) -Tolerance 512) -and (Compare-POGammaRamps -Expected ([int[]]@($ramp.Blue)) -Actual ([int[]]@($currentRamp.Blue)) -Tolerance 512)
+    if ($modeAlreadyOriginal -and $rampAlreadyOriginal) { return }
+
+    $expectedRefresh = 0
+    $refreshProperty = $change[0].PSObject.Properties['refreshTarget']
+    $refreshBeforeProperty = $change[0].PSObject.Properties['refreshBefore']
+    if ($null -eq $refreshProperty -or $null -eq $refreshBeforeProperty -or -not [int]::TryParse([string]$refreshProperty.Value, [ref]$expectedRefresh)) { throw 'The display transaction does not record a verifiable refresh-rate target.' }
+    $expectedBefore = 0
+    if (-not [int]::TryParse([string]$refreshBeforeProperty.Value, [ref]$expectedBefore)) { throw 'The display transaction contains an invalid original refresh rate.' }
+    $gammaProperty = $change[0].PSObject.Properties['gammaTarget']
+    $targetRefresh = if ($expectedRefresh -ne $expectedBefore) { $expectedRefresh } else { $expectedBefore }
+    if (-not $modeAlreadyOriginal -and ([int]$currentMode.PelsWidth -ne [int]$mode.PelsWidth -or [int]$currentMode.PelsHeight -ne [int]$mode.PelsHeight -or [int]$currentMode.BitsPerPel -ne [int]$mode.BitsPerPel -or [int]$currentMode.DisplayFrequency -ne $targetRefresh)) {
+        throw 'The current display mode changed after Platinum Optimizer ran; refusing to overwrite the newer display choice.'
     }
+    $currentMatchesExpectedRamp = $rampAlreadyOriginal
+    if ($gammaProperty -and $null -ne $gammaProperty.Value) {
+        $targetRamp = Compute-POGammaRamp -Gamma ([double]$gammaProperty.Value)
+        $currentMatchesExpectedRamp = (Compare-POGammaRamps -Expected ([int[]]@($targetRamp.Red)) -Actual ([int[]]@($currentRamp.Red)) -Tolerance 512) -and (Compare-POGammaRamps -Expected ([int[]]@($targetRamp.Green)) -Actual ([int[]]@($currentRamp.Green)) -Tolerance 512) -and (Compare-POGammaRamps -Expected ([int[]]@($targetRamp.Blue)) -Actual ([int[]]@($currentRamp.Blue)) -Tolerance 512)
+    }
+    if (-not $rampAlreadyOriginal -and -not $currentMatchesExpectedRamp) { throw 'The current display gamma ramp changed after Platinum Optimizer ran; refusing to overwrite the newer color choice.' }
+    $testResult = Set-PODisplayModeInternal -DeviceName $deviceName -Width ([int]$mode.PelsWidth) -Height ([int]$mode.PelsHeight) -BitsPerPel ([int]$mode.BitsPerPel) -Frequency ([int]$mode.DisplayFrequency) -TestOnly
+    if ($testResult -ne [PlatinumOptimizer.Display.Native]::DISP_CHANGE_SUCCESSFUL) { throw "Windows rejected the captured display mode for $deviceName (result $testResult); the mode was not changed." }
+    Set-PODisplayRampInternal -DeviceName $deviceName -ChannelValues ([int[]]@($ramp.Red)) -GreenValues ([int[]]@($ramp.Green)) -BlueValues ([int[]]@($ramp.Blue))
+    $applyResult = Set-PODisplayModeInternal -DeviceName $deviceName -Width ([int]$mode.PelsWidth) -Height ([int]$mode.PelsHeight) -BitsPerPel ([int]$mode.BitsPerPel) -Frequency ([int]$mode.DisplayFrequency)
+    if ($applyResult -ne [PlatinumOptimizer.Display.Native]::DISP_CHANGE_SUCCESSFUL) { throw "Windows failed to apply the captured display mode for $deviceName (result $applyResult)." }
+    $verify = Get-POCurrentDisplayModeInternal -DeviceName $deviceName
+    if ([int]$verify.DisplayFrequency -ne [int]$mode.DisplayFrequency -or [int]$verify.PelsWidth -ne [int]$mode.PelsWidth -or [int]$verify.PelsHeight -ne [int]$mode.PelsHeight -or [int]$verify.BitsPerPel -ne [int]$mode.BitsPerPel) { throw "Display restore verification failed for $deviceName." }
     $state = Get-PODisplayModuleState
     if ($state -and $state.Devices) {
         $remaining = @($state.Devices | Where-Object { $_.DeviceName -ne $deviceName })
@@ -723,5 +789,5 @@ function Restore-PODisplaySection {
 Export-ModuleMember -Function @(
     'Get-PODisplayProfileCatalog', 'Get-PODisplayProfiles', 'Get-PODisplayInventory', 'Get-PODisplayModuleState',
     'Compute-POGammaRamp', 'Compare-POGammaRamps', 'Select-POHighestRefresh', 'Test-PODdcCiAvailability', 'Get-POGpuColorControlStatus',
-    'Invoke-PODisplayProfile', 'Restore-PODisplayConfiguration', 'Restore-PODisplaySection'
+    'Invoke-PODisplayProfile', 'Restore-PODisplayConfiguration', 'Restore-PODisplaySection', 'Get-PODisplayLiveStateSnapshot'
 )

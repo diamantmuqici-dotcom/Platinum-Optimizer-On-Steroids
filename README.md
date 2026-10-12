@@ -1,149 +1,137 @@
-# Platinum Optimizer On Steroids v2.0 — Automatic CMD Gaming Optimizer
+# Platinum Optimizer On Steroids
 
-**A fully automatic, command-line Windows gaming optimization engine.** No graphical dashboard, no WPF interface, no browser UI, and no interactive category-selection menu — the Command Prompt console is the entire user interface. Right-click the launcher, choose **Run as administrator**, accept the normal Windows UAC prompt, and the optimizer runs its complete verified workflow by itself and prints an honest final report.
+**An automatic, foreground-only Windows gaming optimizer with a CMD interface.** The old WPF dashboard and category-selection flow have been removed. The default run detects the system, creates and verifies a recovery backup, configures the supported Platinum power plan, verifies its active state, writes a timestamped report, and waits for a key before closing.
 
-It detects the PC before changing anything, creates a System Restore point when available plus a checksum-verified configuration backup, applies only documented and hardware-appropriate optimizations, verifies every write by reading it back, and can restore everything it recorded. It never claims an FPS or ping gain without a real measurement.
-
-```
-============================================================
-        PLATINUM OPTIMIZER ON STEROIDS  v2.0.0
-                AUTOMATIC MODE
-============================================================
-
----- PREFLIGHT ----
-[PASS] Administrator privileges confirmed.
-[PASS] powercfg.exe is available.
----- SYSTEM DETECTION ----
-[INFO] Windows: Microsoft Windows 11 Pro | Build 26100 | 64-bit | Supported: True
-[INFO] CPU: ... | physical cores: 8 | logical: 16
-[INFO] Network: Ethernet [Ethernet] link 1 Gbps duplex True
-[INFO] 'Platinum On Steroids' plan: present (d6a1b3c2-...)
----- RECOVERY PREPARATION ----
-[INFO] System Restore point created (supplemental recovery; ...).
----- POWER MANAGEMENT ----
-[PASS] Configuration backup created and checksum-verified: C:\ProgramData\PlatinumOptimizer\Backups\Backup_...
-[PASS] Power: Platinum On Steroids preset 'gaming' applied and verified ...
-...
-============================================================
-                  OPTIMIZATION REPORT
-============================================================
-
-Changes applied and verified : N
-Already optimized            : N
-Skipped (with reason)        : N
-Failed                       : N
-Unverified (not success)     : N
-Reboot recommended           : No
-
-Backup : C:\ProgramData\PlatinumOptimizer\Backups\Backup_...
-Log    : C:\ProgramData\PlatinumOptimizer\logs\Run_..._optimize
-
-Recommended next steps:
-  - ...
-Press any key to exit...
-```
-
-Every status line reflects an actual operation and its verified outcome: `[INFO]` observation, `[PASS]` verified success or already-optimized state, `[WARN]` a gap or unverified result, `[SKIP]` a documented reason a change was not made, `[FAIL]` an operation that failed. Nothing is printed as successful before it has succeeded and been verified.
-
-> **V9.3 → v2.0 history:** The original 2,841-line V9.3 command file is archived as non-executable plain text under `legacy/` (see [`docs/legacy-v9.3-audit.md`](docs/legacy-v9.3-audit.md)). The v1.x WPF dashboard was **removed completely** in v2.0 and replaced by this automatic CMD engine; the migration report is [`docs/IMPLEMENTATION-REPORT-V2.md`](docs/IMPLEMENTATION-REPORT-V2.md). The original `.cmd` filename remains as a compatibility launcher that runs the same engine — it never executes the V9.3 command list and never starts a GUI.
+The optimizer is intentionally conservative: it does not promise FPS or ping improvements, and it does not apply undocumented registry recipes or blanket service/network tweaks.
 
 ## Requirements
 
-- Windows 10 or Windows 11 (desktop editions) with built-in Windows PowerShell 5.1.
-- Administrator privileges for the automatic run — requested through the standard Windows UAC prompt. Read-only modes (`-Scan`, `--benchmark`) work without elevation.
-- No Python, no third-party package, no download, no telemetry service, and no background process. The optimizer runs in the visible foreground and exits when its work is done.
+- Windows 10 or Windows 11.
+- Built-in Windows PowerShell 5.1 and `powercfg.exe`.
+- Administrator privileges for automatic optimization and recovery. Read-only scan and benchmark modes do not require elevation.
+- No Python, third-party downloads, telemetry service, network account, or persistent background service is used by the Windows application.
 
 ## Run
 
-**Primary launcher (single file):** right-click `PlatinumOptimizer.bat` → **Run as administrator** — or simply double-click it: the launcher detects whether it is elevated and, if not, re-launches itself through the normal Windows UAC prompt. If you decline elevation, it exits safely and changes nothing.
+1. Right-click **`PlatinumOptimizer.bat`** and choose **Run as administrator**. You can also double-click it; the launcher will request elevation through the normal Windows UAC confirmation.
+2. Approve the Windows UAC prompt. This is the standard Windows security mechanism. If approval is declined, the optimizer exits without applying changes.
+3. Automatic mode starts without asking you to choose categories. The visible CMD/PowerShell console shows each detected operation and its actual result, then waits for a key before closing.
 
-**From the repository layout:** double-click `Platinum+Optimizer.V9.3.FREE.cmd` (same elevation logic), or run:
+The compatibility launcher **`Platinum+Optimizer.V9.3.FREE.cmd`** delegates to the same CMD-only application. The old V9.3 tweak list is archived as non-executable text under `legacy/`; it is never run.
+
+### Optional command-line modes
+
+```cmd
+PlatinumOptimizer.bat --scan
+PlatinumOptimizer.bat --benchmark
+PlatinumOptimizer.bat --restore
+PlatinumOptimizer.bat --self-test
+```
+
+- `--scan` captures a read-only system assessment.
+- `--benchmark` captures a short Windows resource sample; it does not launch a game or report FPS/frame-time results.
+- `--restore` restores the newest valid backup with recorded changes that have not already been restored. Completed sections are not selected repeatedly; after recovery, another run can step back to an earlier run. Before restoring, it requires a fresh verified export of the active power scheme and, when present, the Platinum scheme/settings.
+- `--self-test` runs the PowerShell test harness without changing system settings.
+
+For a specific backup path, open an elevated Command Prompt and run:
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\src\PlatinumOptimizer.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\src\PlatinumOptimizer.ps1" -Mode Restore -BackupPath "C:\path\to\backup"
 ```
 
-### Modes
+The engine validates the backup manifest and checksums before restoring. It restores only supported changes recorded in that backup. It does not delete unrelated power plans.
 
-| Command | What it does | Elevation |
-|---|---|---|
-| `PlatinumOptimizer.bat` | **Default: fully automatic optimization run.** No menus, no category selection. | Yes (auto-elevates via UAC) |
-| `PlatinumOptimizer.bat --restore [id]` | Restores the settings recorded in the latest valid backup (or the backup with the given id) and verifies the rollback. | Yes |
-| `PlatinumOptimizer.bat --benchmark [--target host]` | Diagnostic mode: samples CPU/RAM/disk counters (and optional ICMP to an explicitly chosen host), saves a snapshot, changes nothing. | No |
-| `PlatinumOptimizer.bat -Scan` | Read-only hardware/Windows snapshot as JSON. | No |
-| `PlatinumOptimizer.bat -SelfTest` | Runs the built-in test harness. | No |
+## What automatic mode detects
 
-Regenerate the single-file release after source changes with `python tools\build_single_file.py` (developer tool; the checked-in BAT is the release artifact, verified byte-exact by `python tools\build_single_file.py --check`).
+Where Windows exposes the data, the report includes:
 
-## What the automatic run does
+- Windows edition, family, version, build, and architecture; administrator status; and pending-reboot indicators.
+- Device model/form factor and power source; CPU model, reported architecture, core/thread counts, clocks and cache; GPU model/driver; installed memory; system volume and storage-device inventory.
+- Active and available power plans, supported processor power settings and core-parking visibility.
+- Connected network adapters, inferred Ethernet/Wi-Fi type, status, link speed, DNS-state readability, and a read-only `netsh interface tcp show global` snapshot.
+- Display mode/refresh information where the display APIs report it, audio controller/endpoints, relevant gaming registry values, Windows security posture, aggregate CPU/memory/disk counters, and read-only startup/service inventory counts.
 
-Pipeline order (each stage prints its real result):
+Unknown or unavailable hardware fields stay **Unknown**. Generic Windows inventory does not reliably report every hybrid-core topology, GPU temperature/utilization, HDR state, game FPS, frame times, DPC/ISR latency, or monitor color capability.
 
-1. **Preflight** — Windows 10/11 detection, administrator check, `powercfg` availability. Unsupported hosts stop before any change.
-2. **Detection** — Windows edition/build/architecture; CPU model, physical/logical cores; GPU(s) and driver versions; memory; system volume free space; form factor and power source (desktop vs laptop, AC vs battery); network adapters with Ethernet/Wi-Fi classification, link speed and duplex; active power plan and existing `Platinum On Steroids` plan; current gaming registry settings; core-parking exposure; Quick CPU presence (detected, never launched); HAGS state; pending-reboot indicators. Missing optional fields are reported as Unknown — they never crash the run.
-3. **Recovery preparation** — a System Restore point is attempted when System Restore is enabled (time-bounded, supplemental), and a **checksum-verified configuration backup** is created *before* any change. If the backup fails, no system change is applied.
-4. **Power management — `Platinum On Steroids` plan** — created from the documented High Performance scheme via `powercfg /duplicatescheme` or **reused by GUID if it already exists** (idempotent: repeated runs never duplicate plans). Preset values (Gaming on desktops, thermally capped Laptop preset on AC laptops) come exclusively from the Microsoft-documented GUID catalog in `src/data/power-settings.json`. Every write is re-read with `powercfg /qh` and compared; unsupported settings (boost policy, core parking on some platforms) are skipped as NOT_SUPPORTED, never forced. The plan is activated only after verification, and the previously active plan is recorded for one-command restore. Existing plans are never deleted. Sleep is never disabled; laptops on battery are never given a performance plan.
-5. **CPU / core parking** — processor power settings are applied through the verified plan above; core-parking exposure and current values are read from the active scheme and reported. No registry hacks, no forced affinity, no idle-state disabling, no BIOS/firmware/voltage changes.
-6. **Windows gaming settings** — Game Mode is enabled and background Game DVR/app capture is disabled through four HKCU registry values, each captured-before/written/verified-by-re-read, on failure rolled back immediately. The Xbox Game Bar app itself, Defender, Firewall, Windows Update, audio, networking, input, and accessibility components are **never** disabled. No service is modified or stopped; no process is terminated.
-7. **GPU & display (read-only)** — per-display resolution/refresh, the highest enumerated refresh at the current resolution (reported as a recommendation when higher, never changed automatically: an unsupported rate can blank the screen), HDR/ICC status as reported, DDC/CI capability probe, and vendor color-control detection (NVIDIA/AMD/Intel surfaces are reported with their manual paths; no saturation/vibrance value is written because no documented write API exists, and third-party color software such as PlexusX is never touched). HAGS is assessed and recommended, not flipped (it needs a reboot and GPU/driver support).
-8. **Network** — the module **reads the current TCP state first** (`Get-NetTCPSetting`, `netsh` fallback) and acts only on deviations from documented Windows defaults: receive-window autotuning below `normal` is restored to `normal`; RSS is enabled when disabled on a multi-core system. ECN, TCP timestamps, RSC, the congestion provider, and offload features are **assessed and reported, never blindly changed**. Connected wired adapters get "allow the computer to turn off this device" disabled (previous value captured, verified, restorable); Wi-Fi power saving is left alone; on battery nothing is changed. The DNS resolver cache is flushed. No DNS server, speed/duplex setting, network identity, or firewall rule is changed, and no network reset is run.
-9. **Storage & background (read-only)** — free space warning below 10%, user TEMP inventory older than 7 days (reported, **not** auto-deleted — deletion is irreversible), startup entry count (review stays in Settings > Apps > Startup), largest background processes by working set (reported, never terminated). The page file, memory compression, SysMain, and Windows Search are untouched.
-10. **Final verification pass** — active plan GUID, gaming registry values, and TCP state are re-read and compared; anything that cannot be confirmed is reported as **Unverified**, not as success.
-11. **Report + logs** — console report (applied / already optimized / skipped / failed / unverified / reboot), recommended next steps, honest notes, `report.json` and a human-readable `run.log` in a per-run timestamped directory, plus the append-only JSONL log.
+## Automatic power-plan configuration
 
-Independent optional failures never abort the whole run; critical failures (unsupported OS, no elevation, detection failure, backup failure) stop changes safely before they happen.
+The engine creates or reuses a Windows power scheme named exactly **Platinum On Steroids**, then activates it only after Windows verifies its GUID.
 
-## Backup and recovery
+- If it must be created, the plan is copied from the currently active scheme, preserving the existing Windows/OEM policy as its baseline. Balanced is the fallback if the active scheme cannot be read.
+- Repeated runs reuse the existing scheme; they do not create duplicate Platinum plans.
+- The automatic desktop/AC configuration changes only documented processor minimum/maximum state and AC cooling policy when the setting is exposed and its read-back verifies. Minimum state remains low for idle efficiency; the maximum is not forced beyond 100 percent.
+- On positively identified laptops, the battery-side maximum processor state is capped at 85 percent. This conservative cap can reduce performance on battery; other battery, sleep, display, USB, and OEM behavior is retained from the active plan.
+- Core parking, boost mode, PCIe ASPM, USB suspend, sleep/display timers, processor affinity, voltage, firmware, and overclock settings are not force-tuned. Unsupported settings are skipped and reported.
+- A failed or unverifiable operation is not reported as successful. A transaction failure attempts to restore the original power settings; a newly created plan is removed only when the optimizer can verify that it is the exact new plan and is not active.
 
-Backups live under **`%ProgramData%\PlatinumOptimizer\Backups\Backup_<timestamp>\`** for elevated runs (older v1.x backups under `%LOCALAPPDATA%\PlatinumOptimizer\Backups\` are still found and restorable). Each snapshot contains:
+These settings affect Windows power policy, not game rendering or network routing. A power plan may change power draw, fan behavior, and responsiveness, but **no FPS, frame-time, temperature, or latency improvement is guaranteed**.
+
+## Changes deliberately left read-only
+
+These categories are assessed and documented, but the default run does not change them because the correct value depends on the user's preference, driver, device, workload, or a supported control interface:
+
+- Game Mode, Game Bar, DVR/background capture, and recording preferences.
+- TCP congestion control, ECN, timestamps, receive-window autotuning, DNS, adapter offloads, RSC/RSS, duplex, and adapter power management.
+- GPU vendor controls, monitor saturation/colors, ICC profiles, resolution, refresh rate, and graphics scheduling.
+- Startup entries, services, scheduled tasks, background processes, temporary files, page-file policy, memory compression, and Windows security features.
+
+No DNS server is forced, no connection is reset, no process is killed, no service is disabled, and Defender, Firewall, Windows Update, UAC, Secure Boot, Memory Integrity, and recovery protections are not modified. Ping depends on the ISP, route, congestion, server location, and the game server.
+
+Display and audio modules are retained as read-only diagnostics/recovery components; they do not launch a dashboard or pop-up window. Automatic color adjustment is not attempted because a reliable vendor-supported write interface is not available in this project.
+
+## Backups, reports, and recovery
+
+All application data stays local under:
 
 ```text
-registry/   Game Mode / Game DVR values captured before any write
-power/      prior active plan GUID + .pow export + Platinum plan state
-network/    DNS state per adapter, TCP global before-state, adapter power before-state
-system/     full hardware/Windows snapshot
-services/, bcd/   read-only inventories (never modified)
-audio/, display/  captured state when a v1.x audio/display change was recorded
-manifest.json     change ledger with SHA-256 checksums and restore history
+%LOCALAPPDATA%\PlatinumOptimizer\
+  Backups\   timestamped, checksummed configuration backups
+  logs\      one human-readable log per run
+  reports\   one structured JSON report per run
+  power\     optimizer state for the Platinum plan
 ```
 
-**Recovery:** `PlatinumOptimizer.bat --restore` validates the manifest (checksums, ids, path safety), then restores **only the sections this application recorded as changed**: the previous power plan (re-importing the `.pow` if needed), the captured registry values, TCP settings, adapter power management, and any v1.x audio/display/DNS changes. Malformed or unlisted values are refused. The `Platinum On Steroids` plan itself is never deleted during restore. A System Restore point, when one was created, is additional protection.
+Before a power-plan change, the engine validates its configuration backup. It records the prior active plan GUID and exports that plan; if a Platinum plan already exists, it also exports that scheme and records the documented processor settings before changing them. A critical backup or checksum failure stops the workflow before power settings are changed.
 
-## Performance honesty
+Windows System Restore is supplemental. After the verified application backup is in place, the optimizer attempts to create a restore point only when the built-in command is available; it does not enable System Protection. If Windows blocks or cannot verify the restore point, the run reports that fact and relies on the explicit application backup.
 
-- No FPS, frame-time, latency, or ping improvement is promised or faked. Ping also depends on your ISP, routing, congestion, server location, and the game server itself.
-- `--benchmark` records real CPU/RAM/disk counters and optional ICMP to a host **you** choose, with before/after comparison guidance; GPU usage and FPS are explicitly reported as *not measured* (no game injection, no fabricated scores).
-- "Gaming score" does not exist in this application.
+Run **`PlatinumOptimizer.bat --restore`** to restore the newest valid, not-yet-restored recorded change. Recovery reactivates the previous plan and, when a Platinum plan existed before the run, restores only AC/DC setting sides recorded as attempted by the optimizer and still matching its recorded target. Values already at baseline are left alone; a later conflicting value blocks the overwrite. A Platinum plan newly created by a successful run is retained but is no longer active after restoration; unrelated plans are never deleted.
+
+The report distinguishes attempted changes, verified changes, values already at target, skipped operations, failures, and operations that could not be verified. Logs and reports contain local OS/hardware/adapter metadata but never collect passwords, authentication tokens, or personal document contents.
 
 ## Repository layout
 
 ```text
-PlatinumOptimizer.bat                  Single-file release: auto-elevating CMD launcher + embedded engine
-Platinum+Optimizer.V9.3.FREE.cmd       Compatibility launcher for the repository layout (same engine)
-src/PlatinumOptimizer.ps1              Console engine entry point (no GUI code remains)
-src/core/PlatinumOptimizer.Core.psm1   Detection, backup/restore ledger, registry round-trip, logging
-src/core/PlatinumOptimizer.Power.psm1  Platinum On Steroids plan lifecycle and CPU power readout
-src/core/PlatinumOptimizer.Network.psm1 Assess-first TCP/adapter optimization with verified restore
-src/core/PlatinumOptimizer.Gaming.psm1 Game Mode / Game DVR changes, HAGS/startup/background assessment
-src/core/PlatinumOptimizer.Engine.psm1 Console pipeline, run logs, report, restore/benchmark modes
-src/core/PlatinumOptimizer.Audio.psm1  Audio inventory + reversible preset (v1.x backups remain restorable)
-src/core/PlatinumOptimizer.Display.psm1 Display inventory, gamma/refresh math, color-control detection
-src/data/                              Documented power-setting GUIDs and presets, catalogs
-tests/Run-Tests.ps1                    Windows PowerShell test harness (pure logic + Windows integration)
-tools/build_single_file.py             Builds and verifies PlatinumOptimizer.bat (developer tool)
-tools/ps_syntax_sanity.py              Structural PowerShell scan for non-Windows workspaces
-tools/ps_tree_sitter_check.py          Tree-sitter PowerShell parse gate (developer tool)
-tools/audit_legacy.py                  Non-executing legacy V9.3 audit extractor
-legacy/                                Original V9.3 source, archived as plain text
-docs/                                  Audit, references, limitations, implementation reports
+PlatinumOptimizer.bat                  Primary CMD launcher
+Platinum+Optimizer.V9.3.FREE.cmd       Compatibility launcher for old shortcuts
+src/Launcher.ps1                       UAC/elevation and mode handoff
+src/PlatinumOptimizer.ps1              CMD-oriented application entry point
+src/core/PlatinumOptimizer.Automatic.psm1  Automatic pipeline, logging, reports
+src/core/PlatinumOptimizer.Core.psm1       Detection, backups, recovery, diagnostics
+src/core/PlatinumOptimizer.Power.psm1      Verified powercfg configuration/recovery
+src/core/PlatinumOptimizer.Audio.psm1      Read-only audio inventory and safe legacy recovery
+src/core/PlatinumOptimizer.Display.psm1    Read-only display diagnostics and recovery
+src/data/                              Power settings and diagnostic catalogs
+legacy/                                Non-executable V9.3 archive
 ```
 
-## Tests / build status
+## Development and tests
 
-There is no compiler step; this is a Windows PowerShell application. `tests/Run-Tests.ps1` covers the launcher structure (elevation, exit codes, pause, embedded byte-exact payload, **no GUI file**), administrator/Windows gating, hardware detection with missing fields, backup creation/validation/checksum safety, `Add-POBackupFile` ledger integrity, power-plan preset validation against the documented GUID catalog, `powercfg` output parsers, automatic preset selection (desktop/laptop/battery/unknown), network safety rules (defaults untouched, only sub-default autotuning/RSS corrected, ECN/timestamps/RSC never flipped), gaming registry allowlist, report counter accuracy, restore-target selection (refuses INVALID backups), and repeated-execution idempotency rules.
+On Windows, run the repository harness with built-in Windows PowerShell 5.1:
 
-`python tools/ps_syntax_sanity.py` and `python tools/build_single_file.py --check` run on any platform; `python tools/audit_legacy.py` re-verifies the archived V9.3 inventory. This repository workspace is Linux-based: the structural gates and byte-exact release verification run here, while the Windows PowerShell test harness, the UAC flow, WMI coverage, live powercfg/netsh/registry writes, and live backup/restore must be verified on actual Windows 10/11 hardware before release. See [`docs/KNOWN-LIMITATIONS.md`](docs/KNOWN-LIMITATIONS.md).
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Run-Tests.ps1
+```
 
-## Technical references
+On any host with Python 3, run the static/contract checks:
 
-See [`docs/REFERENCES.md`](docs/REFERENCES.md) for the Microsoft documentation behind powercfg, processor power management, TCP networking, Game Mode/capture settings, and WMI/CIM.
+```bash
+python tools/ps_syntax_sanity.py
+python -m unittest discover -s tests -p 'test_*.py'
+```
+
+The Windows-specific `powercfg`, registry, UAC, System Restore, network-adapter, display, and audio integrations must be verified on Windows 10/11 hardware. This repository checkout is tested in a non-Windows environment; it cannot honestly claim a live Windows end-to-end run here.
+
+## Legacy safety audit
+
+The original V9.3 command file is preserved as `legacy/Platinum+Optimizer.V9.3.FREE.cmd.disabled.txt` for audit only. See [`docs/legacy-v9.3-audit.md`](docs/legacy-v9.3-audit.md) and [`docs/legacy-v9.3-tweak-inventory.csv`](docs/legacy-v9.3-tweak-inventory.csv). The compatibility launcher does not execute it.

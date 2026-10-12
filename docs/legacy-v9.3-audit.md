@@ -62,17 +62,17 @@ The following *ideas* are retained with safer implementations:
 
 The inventory's duplicate count is based on identical extracted operation/target/setting/value tuples. In addition, V9.3 contains semantic conflicts that do not appear as exact duplicates: for example, GPU flip/overlay values are set more than once with different values; memory-management flags are repeatedly written and later deleted; visual-effects settings are set to different values; services are disabled in one list and later set back to demand/automatic; Store and Windows Update code paths partially undo earlier writes. This makes the final state ordering-dependent and prevents a truthful single "recommended value" from being stated.
 
-## Migration plan implemented
+## Migration implemented
 
-1. Preserve the source only as a non-runnable audit artifact; replace its launch path with a transparent local frontend.
-2. Remove every V9.3 write, destructive command, forced reboot, service loop, package removal, and security/network/driver override from the executable path.
-3. Detect Windows/hardware first with read-only CIM/WMI; never infer unknown model/build fields.
-4. Offer profiles that select an existing power plan only after a preview and battery/compatibility check; perform backup, apply, verify, and failure rollback.
-5. Offer an optional supported DNS action with a per-adapter snapshot, explicit confirmation, verification, and automatic rollback on error.
-6. Keep Game Mode/capture/graphics/mouse/startup decisions in Windows Settings; service, BCD, AppX, startup, task, and driver audits remain read-only.
-7. Capture before/after system counters and ping only on user request; explicitly report missing game FPS/frame-time/DPC latency as **Not measured**.
-8. Test pure compatibility, plan-selection, backup schema, dry-run semantics, and audit coverage without running the legacy code.
+1. Preserve the V9.3 source only as a non-runnable audit artifact. Both the current launcher and the old compatibility shortcut use the new CMD-only entry point.
+2. Remove the legacy write list, destructive cleanup, forced reboot, service/package loops, security changes, and undocumented network/driver/registry overrides from every executable path.
+3. Detect Windows and hardware with read-only CIM/WMI and supported Windows commands; report unknown fields rather than inferring missing values.
+4. Replace the category-driven dashboard with automatic foreground execution. The default run creates and validates a timestamped backup before configuring a documented power scheme.
+5. Clone the currently active plan (Balanced fallback), reuse the exact-name Platinum scheme on repeat runs, make only conservative supported processor policy changes, verify read-back, and activate the plan only after verification.
+6. Keep Game Mode/capture, graphics/color, network, startup, services, storage, memory, and security settings read-only in automatic mode. No user connection or essential Windows service is changed.
+7. Write one human log and structured JSON report per run. `--restore` validates and restores only recorded changes; System Restore is supplemental and best effort.
+8. Preserve read-only scan and short resource-sample modes. FPS, frame time, game-server latency, thermals, and exact DPC/ISR latency remain **Not measured**.
 
 ## Evidence references
 
-See [`REFERENCES.md`](REFERENCES.md) for Microsoft documentation on power plans, DnsClient, CIM inventory, Game Mode, and graphics preferences. For a retired setting that lacks an official contract or demonstrable evidence, the decision is to omit it rather than label internet repetition as justification.
+See [`REFERENCES.md`](REFERENCES.md) for Microsoft documentation on power schemes, processor settings, Windows inventory, network assessment, display diagnostics, and System Restore. For a retired setting without a supported contract or verified evidence, the optimizer leaves it unchanged rather than presenting internet repetition as a recommendation.

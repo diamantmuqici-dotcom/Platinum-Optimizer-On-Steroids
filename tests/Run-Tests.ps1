@@ -9,9 +9,7 @@ Import-Module -Name $modulePath -Global -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Power.psm1') -Global -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Audio.psm1') -Global -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Display.psm1') -Global -Force -ErrorAction Stop
-Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Network.psm1') -Global -Force -ErrorAction Stop
-Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Gaming.psm1') -Global -Force -ErrorAction Stop
-Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Engine.psm1') -Global -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Automatic.psm1') -Global -Force -ErrorAction Stop
 $script:CoreModule = @(Get-Module | Where-Object { $_.Path -eq $modulePath } | Select-Object -First 1)[0]
 
 $script:Passed = 0
@@ -311,12 +309,13 @@ catch {
     Assert-POTest $false 'Backup/dry-run/registry tests' $_.Exception.Message
 }
 
-# Platinum On Steroids extension tests: power presets, audio presets,
-# display profiles, pure parsers, and the single-file release structure.
+# Platinum On Steroids tests: power presets, audio/display diagnostics,
+# pure parsers, automatic CLI helpers, and launcher structure.
 # These are pure logic/structure tests and run on any host.
 try {
     $powerCatalog = Get-Content -LiteralPath (Join-Path $repoRoot 'src\data\power-settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-POTest ($powerCatalog.planName -eq 'Platinum On Steroids') 'Power catalog defines the exact Platinum On Steroids plan name'
+    Assert-POTest ($powerCatalog.duplicateBaseScheme -eq 'balanced') 'Balanced is the safe fallback scheme when the active plan cannot be read'
     $guidPattern = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
     $allGuids = @($powerCatalog.builtinSchemes.PSObject.Properties | ForEach-Object { [string]$_.Value })
     $allGuids += @($powerCatalog.subgroups.PSObject.Properties | ForEach-Object { [string]$_.Value })
@@ -345,7 +344,20 @@ try {
     }
     Assert-POTest ($presetValidationIssues.Count -eq 0) 'All power presets reference only documented settings inside documented ranges' ($presetValidationIssues -join '; ')
     $competitivePreset = @($powerCatalog.presets | Where-Object { $_.id -eq 'competitive' } | Select-Object -First 1)[0]
-    Assert-POTest ([bool]$competitivePreset.requiresThermalConfirmation) 'Competitive preset requires a separate thermal/power confirmation'
+    Assert-POTest (-not [bool]$competitivePreset.requiresThermalConfirmation) 'No aggressive competitive power preset is offered automatically'
+    $automaticPresetIssues = @()
+    foreach ($preset in @($powerCatalog.presets | Where-Object { $_.id -in @('gaming', 'laptop') })) {
+        foreach ($sideName in @('ac', 'dc')) {
+            $side = $preset.PSObject.Properties[$sideName]
+            if ($null -eq $side -or $null -eq $side.Value) { continue }
+            foreach ($property in $side.Value.PSObject.Properties) {
+                if ($property.Name -match 'core-parking|boost-policy|pci-express|usb-selective|sleep-after|display-off') { $automaticPresetIssues += "$($preset.id).$sideName.$($property.Name) is not part of conservative automatic mode" }
+                if ($property.Name -eq 'processor-min-state' -and [int]$property.Value -gt 5) { $automaticPresetIssues += "$($preset.id).$sideName forces a high processor minimum" }
+                if ($property.Name -eq 'processor-max-state' -and [int]$property.Value -gt 100) { $automaticPresetIssues += "$($preset.id).$sideName exceeds the documented maximum" }
+            }
+        }
+    }
+    Assert-POTest ($automaticPresetIssues.Count -eq 0) 'Automatic power presets avoid forced parking, boost, connectivity, and timer tweaks' ($automaticPresetIssues -join '; ')
 
     $listSample = @(
         'Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced) *',
@@ -374,9 +386,50 @@ try {
     $minState = @($parsedQuery | Where-Object { $_.SettingGuid -eq '893dee8e-2bef-41e0-89c6-b55d0929964c' } | Select-Object -First 1)[0]
     Assert-POTest ($minState.AcIndex -eq 100 -and $minState.DcIndex -eq 5) 'powercfg /qh parser decodes hex AC/DC indices'
     Assert-POTest ($minState.SubgroupGuid -eq '54533251-82be-4824-96c1-47b60b740d00') 'powercfg /qh parser tracks the owning subgroup'
+    $capturedPowerSettings = ConvertFrom-POPowerSettingsSnapshot -PlanGuid '11111111-2222-3333-4444-555555555555' -Lines $querySample
+    $capturedMin = @($capturedPowerSettings.Settings | Where-Object { $_.Id -eq 'processor-min-state' } | Select-Object -First 1)[0]
+    Assert-POTest ($capturedMin.AcCaptured -and $capturedMin.AcValue -eq 100 -and $capturedMin.DcCaptured -and $capturedMin.DcValue -eq 5) 'Power-settings backup captures exact AC/DC values for verified settings'
+    Assert-POTest ((ConvertFrom-POPowerSettingsSnapshot -PlanGuid '11111111-2222-3333-4444-555555555555' -Lines @()).Settings.Count -eq @($powerCatalog.settings).Count) 'Missing optional power fields remain uncaptured rather than fabricated'
+
+    $beforeSelection = [pscustomobject]@{ Settings = @([pscustomobject]@{ Id = 'processor-min-state'; AcCaptured = $true; AcValue = 100; DcCaptured = $true; DcValue = 5 }) }
+    $targetSelection = [pscustomobject]@{ Settings = @([pscustomobject]@{ Id = 'processor-min-state'; AcCaptured = $true; AcValue = 5; DcCaptured = $true; DcValue = 5 }) }
+    $attemptedWrite = @([pscustomobject]@{ Id = 'processor-min-state-ac'; Attempted = $true; PreviousValue = 100; TargetValue = 5 })
+    $restoreSelectionScript = $script:CoreModule.NewBoundScriptBlock({ param($Before, $Current, $Writes) Get-POPlatinumSettingRestoreSelection -BeforeSnapshot $Before -CurrentSnapshot $Current -SettingWrites $Writes })
+    $selection = & $restoreSelectionScript $beforeSelection $targetSelection $attemptedWrite
+    Assert-POTest (@($selection.RestoreKeys).Count -eq 1 -and $selection.RestoreKeys[0] -eq 'processor-min-state|AC') 'Power recovery selects only the attempted AC side that still matches its recorded target'
+    $alreadyRestoredSelection = & $restoreSelectionScript $beforeSelection $beforeSelection $attemptedWrite
+    Assert-POTest (@($alreadyRestoredSelection.RestoreKeys).Count -eq 0 -and @($alreadyRestoredSelection.AlreadyRestored).Count -eq 1) 'Power recovery does not rewrite a setting side already at its baseline'
+    $newerUserSelection = [pscustomobject]@{ Settings = @([pscustomobject]@{ Id = 'processor-min-state'; AcCaptured = $true; AcValue = 20; DcCaptured = $true; DcValue = 5 }) }
+    $newerValueBlocked = $false
+    try { [void](& $restoreSelectionScript $beforeSelection $newerUserSelection $attemptedWrite) } catch { $newerValueBlocked = $_.Exception.Message -match 'newer user value' }
+    Assert-POTest $newerValueBlocked 'Power recovery refuses to overwrite a later user value'
+    $unattemptedWrite = @([pscustomobject]@{ Id = 'processor-min-state-ac'; Attempted = $false; PreviousValue = 100; TargetValue = 5 })
+    $unattemptedSelection = & $restoreSelectionScript $beforeSelection $targetSelection $unattemptedWrite
+    Assert-POTest (@($unattemptedSelection.RestoreKeys).Count -eq 0) 'Power recovery ignores preset sides that were not attempted'
 }
 catch {
     Assert-POTest $false 'Power module tests' $_.Exception.Message
+}
+
+try {
+    Assert-POTest ((Get-POAutomaticPropertyValue -InputObject ([pscustomobject]@{ Present = 7 }) -Name 'Present') -eq 7) 'Automatic assessment reads present properties'
+    Assert-POTest ($null -eq (Get-POAutomaticPropertyValue -InputObject ([pscustomobject]@{}) -Name 'Missing')) 'Automatic assessment tolerates missing optional fields'
+    Assert-POTest ((Get-POAutomaticAdapterKind -Name 'Wi-Fi 6 Adapter' -Description '802.11ax') -match 'Wi-Fi') 'Network assessment identifies Wi-Fi from Windows adapter metadata'
+    Assert-POTest ((Get-POAutomaticAdapterKind -Name 'Ethernet 2.5GbE' -Description 'PCIe Controller') -match 'Ethernet') 'Network assessment identifies Ethernet from Windows adapter metadata'
+    Assert-POTest ((Get-POAutomaticAdapterKind -Name 'TAP-Windows Adapter' -Description 'Virtual VPN') -match 'Virtual / VPN') 'Network assessment classifies virtual/VPN adapters separately'
+    Assert-POTest ((Get-POAutomaticAdapterKind -Name 'Adapter A' -Description 'Unclassified device') -match 'Unknown') 'Network assessment preserves unknown adapter type'
+    $pendingRestore = Test-POBackupNeedsRestore -Manifest ([pscustomobject]@{ modifiedSections = @('power'); restoreHistory = @() })
+    Assert-POTest ($pendingRestore.NeedsRestore -and @($pendingRestore.PendingSections) -contains 'power') 'Unrestored changed backups remain eligible for recovery'
+    $partialRestore = Test-POBackupNeedsRestore -Manifest ([pscustomobject]@{ modifiedSections = @('power', 'network'); restoreHistory = @([pscustomobject]@{ restoredSections = @('power'); failures = @('network failed') }) })
+    Assert-POTest ($partialRestore.NeedsRestore -and @($partialRestore.RestoredSections) -contains 'power' -and @($partialRestore.PendingSections) -contains 'network') 'Partial recovery does not retry completed sections or hide failed ones'
+    $finishedRestore = Test-POBackupNeedsRestore -Manifest ([pscustomobject]@{ modifiedSections = @('power'); restoreHistory = @([pscustomobject]@{ restoredSections = @('power'); failures = @() }) })
+    Assert-POTest (-not $finishedRestore.NeedsRestore) 'Successfully restored backups are not selected repeatedly'
+    $restoreContext = [pscustomobject]@{ Restored = (New-Object System.Collections.ArrayList); Applied = (New-Object System.Collections.ArrayList); AlreadyOptimized = (New-Object System.Collections.ArrayList); Failed = (New-Object System.Collections.ArrayList); Unverified = (New-Object System.Collections.ArrayList); Skipped = (New-Object System.Collections.ArrayList) }
+    Add-POAutomaticChange -Context $restoreContext -Id 'restore-power' -Name 'Restore power' -Status 'RESTORED_VERIFIED' -Attempted -Verified | Out-Null
+    Assert-POTest ($restoreContext.Restored.Count -eq 1 -and $restoreContext.Applied.Count -eq 0) 'Recovery outcomes are reported separately from optimizer writes'
+}
+catch {
+    Assert-POTest $false 'Automatic CLI helper tests' $_.Exception.Message
 }
 
 try {
@@ -474,11 +527,20 @@ try {
     Set-Content -LiteralPath (Join-Path $ledgerBackup 'manifest.json') -Value ($ledgerManifest | ConvertTo-Json -Depth 6) -Encoding UTF8
     Add-POBackupChange -BackupPath $ledgerBackup -Section audio -Change ([pscustomobject][ordered]@{ section = 'audio'; id = 'audio-preset'; status = 'APPLYING' })
     Add-POBackupChange -BackupPath $ledgerBackup -Section display -Change ([pscustomobject][ordered]@{ section = 'display'; id = 'display-profile'; status = 'APPLYING' })
+    Add-POBackupChange -BackupPath $ledgerBackup -Section power -Change ([pscustomobject][ordered]@{ section = 'power'; id = 'platinum-power-plan'; status = 'APPLYING' })
     Update-POBackupChangeStatus -BackupPath $ledgerBackup -Section audio -Status 'APPLIED_VERIFIED' -Message 'test'
+    $powerWrites = @([pscustomobject][ordered]@{ Id = 'processor-min-state-ac'; Attempted = $true; Status = 'APPLIED_VERIFIED'; Verified = $true; PreviousValue = 100; TargetValue = 5 })
+    Update-POBackupChangeStatus -BackupPath $ledgerBackup -Section power -Status 'APPLIED_VERIFIED' -Message 'test' -PowerSettingWrites $powerWrites
     $ledgerAfter = Get-Content -LiteralPath (Join-Path $ledgerBackup 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-POTest (@($ledgerAfter.modifiedSections) -contains 'audio' -and @($ledgerAfter.modifiedSections) -contains 'display') 'Backup ledger accepts audio and display sections'
     $audioChangeAfter = @($ledgerAfter.changes | Where-Object { $_.section -eq 'audio' } | Select-Object -First 1)
     Assert-POTest ($audioChangeAfter.Count -gt 0 -and $audioChangeAfter[0].status -eq 'APPLIED_VERIFIED') 'Audio change status is updated in the ledger'
+    $powerChangeAfter = @($ledgerAfter.changes | Where-Object { $_.section -eq 'power' } | Select-Object -First 1)
+    Assert-POTest ($powerChangeAfter.Count -gt 0 -and $powerChangeAfter[0].settingWritesRecorded -and @($powerChangeAfter[0].settingWrites).Count -eq 1 -and $powerChangeAfter[0].settingWrites[0].Id -eq 'processor-min-state-ac') 'Power ledger persists per-side attempted-write history for safe recovery'
+    Update-POBackupChangeStatus -BackupPath $ledgerBackup -Section power -Status 'APPLIED_VERIFIED' -Message 'no writes' -PowerSettingWrites @()
+    $emptyLedger = Get-Content -LiteralPath (Join-Path $ledgerBackup 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $emptyPowerChange = @($emptyLedger.changes | Where-Object { $_.section -eq 'power' } | Select-Object -First 1)
+    Assert-POTest ($emptyPowerChange.Count -gt 0 -and $emptyPowerChange[0].settingWritesRecorded -and @($emptyPowerChange[0].settingWrites).Count -eq 0) 'Power ledger records an explicit empty write set for idempotent runs'
     Remove-Item -LiteralPath $ledgerRoot -Recurse -Force
 }
 catch {
@@ -486,246 +548,59 @@ catch {
 }
 
 try {
-    # Single-file release structure (CMD engine v2.0): the BAT is pure batch
-    # up to the payload marker; cmd exits before the payload, and PowerShell
-    # extracts the byte-exact embedded sources at runtime.
     $batPath = Join-Path $repoRoot 'PlatinumOptimizer.bat'
-    Assert-POTest (Test-Path -LiteralPath $batPath -PathType Leaf) 'Single-file release PlatinumOptimizer.bat exists'
-    $batText = [System.IO.File]::ReadAllText($batPath, [System.Text.Encoding]::UTF8)
-    $markerCount = ([regex]::Matches($batText, [regex]::Escape('#>PO_PAYLOAD'))).Count
-    Assert-POTest ($markerCount -eq 1) 'Release file contains exactly one payload marker'
-    $batchSection = $batText.Split('#>PO_PAYLOAD')[0]
-    Assert-POTest ($batchSection.Split("`n")[0].Trim() -eq '@echo off') 'Release batch section starts with @echo off (cmd never parses the payload)'
-    $nonAscii = @([char[]]$batchSection.ToCharArray() | Where-Object { [int]$_ -gt 127 })
-    Assert-POTest ($nonAscii.Count -eq 0) 'Release batch section is pure ASCII (any cmd code page can parse it)'
-    Assert-POTest ($batchSection -match '(?i)powershell\.exe .*-ExecutionPolicy Bypass') 'Release launcher uses Bypass Windows PowerShell'
-    Assert-POTest ($batchSection -notmatch '(?i)-STA') 'Release launcher no longer requires STA (no WPF UI)'
-    Assert-POTest ($batchSection -match '(?i)where powershell\.exe') 'Release launcher fails clearly when PowerShell is missing'
-    Assert-POTest ($batchSection -match '(?i)net session') 'Release launcher detects administrator privileges'
-    Assert-POTest ($batchSection -match '(?i)-Verb RunAs') 'Release launcher self-elevates through the normal Windows UAC mechanism'
-    Assert-POTest ($batchSection -match '(?i)pause >nul') 'Release console stays open until the user presses a key'
-    Assert-POTest ($batchSection -match '(?i)exit /b 3' -and $batchSection -match '(?i)exit /b 4') 'Release launcher returns distinct exit codes for missing PowerShell and declined elevation'
-    foreach ($relative in @('src\PlatinumOptimizer.ps1', 'src\core\PlatinumOptimizer.Core.psm1', 'src\core\PlatinumOptimizer.Power.psm1', 'src\core\PlatinumOptimizer.Audio.psm1', 'src\core\PlatinumOptimizer.Display.psm1', 'src\core\PlatinumOptimizer.Network.psm1', 'src\core\PlatinumOptimizer.Gaming.psm1', 'src\core\PlatinumOptimizer.Engine.psm1', 'tests\Run-Tests.ps1')) {
-        $sourcePath = Join-Path $repoRoot $relative
-        $expectedB64 = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($sourcePath))
-        Assert-POTest ($batText.Contains("Expand-POEmbeddedFile -RelativePath '$relative' -EncodedContent '$expectedB64'")) "Release embeds $relative byte-exact"
-    }
-    Assert-POTest ($batText.Contains('src\data\power-settings.json')) 'Release embeds the Platinum power preset catalog'
-    Assert-POTest ($batText.Contains('src\data\audio-presets.json')) 'Release embeds the audio preset catalog'
-    Assert-POTest ($batText.Contains('src\data\display-profiles.json')) 'Release embeds the display profile catalog'
-    Assert-POTest (-not $batText.Contains('MainWindow.xaml')) 'Release contains no graphical UI file'
+    $compatibilityPath = Join-Path $repoRoot 'Platinum+Optimizer.V9.3.FREE.cmd'
+    $launcherPath = Join-Path $repoRoot 'src\Launcher.ps1'
+    $enginePath = Join-Path $repoRoot 'src\PlatinumOptimizer.ps1'
+    $automaticPath = Join-Path $repoRoot 'src\core\PlatinumOptimizer.Automatic.psm1'
+    $powerPath = Join-Path $repoRoot 'src\core\PlatinumOptimizer.Power.psm1'
+    $uiPath = Join-Path $repoRoot 'src\ui\MainWindow.xaml'
+    Assert-POTest (Test-Path -LiteralPath $batPath -PathType Leaf) 'Primary CMD launcher exists'
+    Assert-POTest (Test-Path -LiteralPath $compatibilityPath -PathType Leaf) 'Old shortcut compatibility launcher exists'
+    Assert-POTest (Test-Path -LiteralPath $launcherPath -PathType Leaf) 'PowerShell elevation/mode launcher exists'
+    Assert-POTest (Test-Path -LiteralPath $enginePath -PathType Leaf) 'PowerShell automatic engine exists'
+    Assert-POTest (-not (Test-Path -LiteralPath $uiPath)) 'Obsolete WPF/XAML dashboard has been removed'
+
+    $batText = [System.IO.File]::ReadAllText($batPath, [System.Text.Encoding]::ASCII)
+    $batchNonAscii = @([char[]]$batText.ToCharArray() | Where-Object { [int]$_ -gt 127 })
+    Assert-POTest ($batchNonAscii.Count -eq 0) 'Primary CMD launcher remains ASCII-safe'
+    Assert-POTest ($batText -match '(?i)%~dp0src\\Launcher\.ps1') 'Launcher resolves its own repository directory'
+    Assert-POTest ($batText -match '(?i)--benchmark' -and $batText -match '(?i)--restore' -and $batText -match '(?i)--scan') 'Launcher exposes only documented automatic/diagnostic modes'
+    Assert-POTest (-not $batText.Contains('#>PO_PAYLOAD')) 'Primary CMD launcher is not the retired self-expanding UI polyglot'
+
+    $launcherText = [System.IO.File]::ReadAllText($launcherPath, [System.Text.Encoding]::UTF8)
+    Assert-POTest ($launcherText -match '(?i)-Verb RunAs') 'Administrator-required modes request standard Windows UAC elevation'
+    Assert-POTest ($launcherText -match '(?i)-Wait -PassThru') 'Elevated process is foreground-waited and returns its exit code'
+    Assert-POTest ($launcherText -match 'ValidateSet\(') 'Launcher validates the supported command modes'
+
+    $engineText = [System.IO.File]::ReadAllText($enginePath, [System.Text.Encoding]::UTF8)
+    $graphicalTokens = @('PresentationFramework', 'PresentationCore', 'System.Windows.Forms', 'XamlReader', 'MainWindow.xaml', 'ShowDialog')
+    $graphicalHits = @($graphicalTokens | Where-Object { $engineText.Contains($_) })
+    Assert-POTest ($graphicalHits.Count -eq 0) 'Main engine contains no WPF/WinForms/browser UI execution path' ($graphicalHits -join ', ')
+    Assert-POTest (-not $engineText.Contains('Read-Host')) 'Automatic engine does not wait for input before beginning work'
+
+    $compatibilityText = [System.IO.File]::ReadAllText($compatibilityPath, [System.Text.Encoding]::ASCII)
+    Assert-POTest ($compatibilityText -match '(?i)call ".*PlatinumOptimizer\.bat"') 'Legacy shortcut delegates to the new launcher'
+    Assert-POTest (-not ($compatibilityText -match '(?i)legacy\\Platinum')) 'Compatibility launcher does not invoke the archived V9.3 file'
+
+    $automaticText = [System.IO.File]::ReadAllText($automaticPath, [System.Text.Encoding]::UTF8)
+    Assert-POTest ($automaticText -match 'Invoke-POPlatinumPlanWorkflow -PresetId \$presetId -Activate') 'Automatic mode starts the verified custom-plan workflow without a category menu'
+    Assert-POTest ($automaticText -match 'appliedAndVerified' -and $automaticText -match 'alreadyOptimized' -and $automaticText -match 'couldNotBeVerified') 'JSON report separates verified, already-optimized, and unverified outcomes'
+    Assert-POTest (-not $automaticText.Contains('Set-DnsClientServerAddress') -and -not $automaticText.Contains('Set-PORegValueState')) 'Automatic pipeline leaves network and registry settings read-only'
+
+    $powerText = [System.IO.File]::ReadAllText($powerPath, [System.Text.Encoding]::UTF8)
+    $workflowStart = $powerText.IndexOf('function Invoke-POPlatinumPlanWorkflow')
+    $workflowEnd = $powerText.IndexOf('function Set-POPlatinumPlanActive', $workflowStart)
+    $workflowText = $powerText.Substring($workflowStart, $workflowEnd - $workflowStart)
+    $backupIndex = $workflowText.IndexOf('$backup = New-POBackup')
+    $createIndex = $workflowText.IndexOf('$createResult = New-POPlatinumPlan')
+    $backupVerifyIndex = $workflowText.IndexOf('$backupValidation = Test-POBackup')
+    Assert-POTest ($backupIndex -ge 0 -and $createIndex -gt $backupIndex -and $backupVerifyIndex -gt $backupIndex -and $backupVerifyIndex -lt $createIndex) 'Power plan backup validation precedes scheme creation and setting writes'
+
+    Assert-POTest (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'tools\build_single_file.py'))) 'Obsolete UI-embedding BAT builder has been removed'
 }
 catch {
-    Assert-POTest $false 'Single-file release tests' $_.Exception.Message
-}
-
-try {
-    # UI removal: the graphical interface and every WPF execution path are gone.
-    Assert-POTest (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'src\ui') -PathType Container)) 'The src\ui graphical interface directory no longer exists'
-    $xamlFiles = @(Get-ChildItem -LiteralPath $repoRoot -Recurse -Filter '*.xaml' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\\.git\\' })
-    Assert-POTest ($xamlFiles.Count -eq 0) 'No XAML file remains in the repository'
-    $entryText = [System.IO.File]::ReadAllText((Join-Path $repoRoot 'src\PlatinumOptimizer.ps1'), [System.Text.Encoding]::UTF8)
-    foreach ($wpfMarker in @('PresentationFramework', 'XamlReader', 'ShowDialog', 'MainWindow.xaml', 'System.Windows.Forms')) {
-        Assert-POTest (-not $entryText.Contains($wpfMarker)) "Engine entry point contains no WPF/WinForms reference ($wpfMarker)"
-    }
-    $cmdText = [System.IO.File]::ReadAllText((Join-Path $repoRoot 'Platinum+Optimizer.V9.3.FREE.cmd'), [System.Text.Encoding]::UTF8)
-    Assert-POTest ($cmdText -match '(?i)net session' -and $cmdText -match '(?i)-Verb RunAs') 'Repository launcher detects elevation and self-elevates via UAC'
-    Assert-POTest ($cmdText -notmatch '(?i)MainWindow|xaml') 'Repository launcher never starts the old graphical UI'
-    Assert-POTest ($cmdText -match '(?i)src\\PlatinumOptimizer\.ps1') 'Repository launcher runs the console engine from the repository layout'
-}
-catch {
-    Assert-POTest $false 'UI removal tests' $_.Exception.Message
-}
-
-try {
-    # CMD engine v2.0: pure pipeline logic that must never depend on live hardware.
-    Assert-POTest ((Get-POEngineVersion) -match '^\d+\.\d+\.\d+$') 'Engine reports a semantic version'
-    Assert-POTest ((Get-POConsolePrefix -Level 'INFO') -eq '[INFO]' -and (Get-POConsolePrefix -Level 'FAIL') -eq '[FAIL]') 'Console status prefixes use the documented [LEVEL] form'
-
-    $desktop = New-TestSystemSnapshot -Family 'Windows 11' -Supported $true -IsLaptop $false -PowerSource 'AC'
-    $desktopPreset = Select-POAutoPowerPreset -Snapshot $desktop
-    Assert-POTest ($desktopPreset.Action -eq 'apply' -and $desktopPreset.PresetId -eq 'gaming') 'Automatic preset selects Gaming for a supported desktop'
-    $laptopAc = New-TestSystemSnapshot -Family 'Windows 11' -Supported $true -IsLaptop $true -PowerSource 'AC'
-    $laptopPreset = Select-POAutoPowerPreset -Snapshot $laptopAc
-    Assert-POTest ($laptopPreset.Action -eq 'apply' -and $laptopPreset.PresetId -eq 'laptop') 'Automatic preset selects the capped Laptop preset on AC'
-    $laptopBattery = New-TestSystemSnapshot -Family 'Windows 11' -Supported $true -IsLaptop $true -PowerSource 'Battery'
-    $batteryPreset = Select-POAutoPowerPreset -Snapshot $laptopBattery
-    Assert-POTest ($batteryPreset.Action -eq 'skip' -and $batteryPreset.Reason -match '(?i)battery') 'Automatic run never applies a performance plan on battery'
-    $unknownDevice = New-TestSystemSnapshot -Family 'Windows 10' -Supported $true -IsLaptop $false -PowerSource 'Unknown'
-    $unknownDevice.Device.IsLaptop = $null
-    $unknownPreset = Select-POAutoPowerPreset -Snapshot $unknownDevice
-    Assert-POTest ($unknownPreset.Action -eq 'skip') 'Automatic run skips the plan change when the form factor is unknown'
-    $unsupportedOs = New-TestSystemSnapshot -Family 'Unsupported' -Supported $false -IsLaptop $false -PowerSource 'AC'
-    Assert-POTest ((Select-POAutoPowerPreset -Snapshot $unsupportedOs).Action -eq 'skip') 'Unsupported Windows receives no automatic plan change'
-
-    $mixedResults = @(
-        (New-POResultRecord -Stage 'Power' -Id 'a' -Status 'APPLIED_VERIFIED' -Message 'applied'),
-        (New-POResultRecord -Stage 'Gaming' -Id 'b' -Status 'ALREADY_OPTIMIZED' -Message 'already'),
-        (New-POResultRecord -Stage 'Network' -Id 'c' -Status 'SKIPPED' -Message 'skipped'),
-        (New-POResultRecord -Stage 'Network' -Id 'd' -Status 'FAILED' -Message 'failed'),
-        (New-POResultRecord -Stage 'Gaming' -Id 'e' -Status 'UNVERIFIED' -Message 'unverified'),
-        (New-POResultRecord -Stage 'Gaming' -Id 'f' -Status 'APPLIED_VERIFIED' -Message 'needs reboot' -RequiresReboot $true),
-        (New-POResultRecord -Stage 'Storage' -Id 'g' -Status 'INFO' -Message 'info')
-    )
-    $summary = Get-POReportSummary -Results $mixedResults
-    Assert-POTest ($summary.Applied -eq 2 -and $summary.AlreadyOptimized -eq 1 -and $summary.Skipped -eq 1 -and $summary.Failed -eq 1 -and $summary.Unverified -eq 1) 'Report summary counts each status exactly as recorded'
-    Assert-POTest ($summary.RebootRecommended) 'Report flags a reboot only when an applied change requires one'
-    Assert-POTest (@($summary.FailedIds) -contains 'Network/d') 'Report names failed operations explicitly'
-    $cleanSummary = Get-POReportSummary -Results @((New-POResultRecord -Stage 'Power' -Id 'x' -Status 'INFO' -Message 'read-only'))
-    Assert-POTest (-not $cleanSummary.RebootRecommended -and $cleanSummary.Failed -eq 0) 'A read-only run never claims failures or reboots'
-
-    $backupChoices = @(
-        [pscustomobject]@{ Id = 'Backup_A'; Path = 'C:\pd\Backup_A'; Status = 'VALID'; ChangeCount = 2; CreatedAt = '2026-10-01 10:00:00 +02:00'; Changes = 'x'; Issues = @() },
-        [pscustomobject]@{ Id = 'Backup_B'; Path = 'C:\pd\Backup_B'; Status = 'VALID'; ChangeCount = 1; CreatedAt = '2026-10-05 10:00:00 +02:00'; Changes = 'y'; Issues = @() },
-        [pscustomobject]@{ Id = 'Backup_C'; Path = 'C:\pd\Backup_C'; Status = 'INVALID'; ChangeCount = 3; CreatedAt = '2026-10-09 10:00:00 +02:00'; Changes = 'z'; Issues = @('checksum mismatch') }
-    )
-    $latest = Select-PORestoreBackup -Backups $backupChoices -BackupId $null
-    Assert-POTest ($latest.Selected -and $latest.Selected.Id -eq 'Backup_B') 'Restore mode selects the newest VALID backup with recorded changes'
-    $explicit = Select-PORestoreBackup -Backups $backupChoices -BackupId 'Backup_A'
-    Assert-POTest ($explicit.Selected -and $explicit.Selected.Id -eq 'Backup_A') 'Restore mode honors an explicit backup id'
-    $invalidChoice = Select-PORestoreBackup -Backups $backupChoices -BackupId 'Backup_C'
-    Assert-POTest ($null -eq $invalidChoice.Selected -and $invalidChoice.Reason -match '(?i)validation') 'Restore mode refuses an INVALID backup'
-    $missingChoice = Select-PORestoreBackup -Backups $backupChoices -BackupId 'Backup_ZZZ'
-    Assert-POTest ($null -eq $missingChoice.Selected) 'Restore mode reports a missing backup id clearly'
-    $emptyChoice = Select-PORestoreBackup -Backups @() -BackupId $null
-    Assert-POTest ($null -eq $emptyChoice.Selected -and $emptyChoice.Reason -match '(?i)no platinum optimizer backup') 'Restore mode explains an empty backup inventory'
-
-    $searchRoots = @(Get-POBackupSearchRoots)
-    Assert-POTest ($searchRoots.Count -ge 1) 'Backup search roots always include at least the local root'
-    Assert-POTest (@($searchRoots | Where-Object { $_ -match '(?i)Backups$' }).Count -eq $searchRoots.Count) 'Every backup search root is a Backups directory'
-}
-catch {
-    Assert-POTest $false 'CMD engine pipeline tests' $_.Exception.Message
-}
-
-try {
-    # Network module: parse-first, act-only-on-deviation, verify, restore.
-    $netshSample = @(
-        'Querying active global state...',
-        '---------------------------------------------',
-        'Receive-Side Scaling State          : enabled',
-        'Receive Window Auto-Tuning Level    : normal',
-        'Add-On Congestion Control Provider  : default',
-        'ECN Capability                      : disabled',
-        'TCP Timestamps                      : disabled',
-        'Receive Segment Coalescing State    : enabled',
-        'Initial RTO (ms)                    : 1000',
-        'Non Sack Rtt Resiliency             : disabled',
-        'Max SYN Retransmissions             : 2'
-    )
-    $parsedTcp = ConvertFrom-PONetshTcpGlobalLines -Lines $netshSample
-    Assert-POTest ($parsedTcp.Available) 'netsh TCP parser recognises documented global-state output'
-    Assert-POTest ($parsedTcp.AutotuningLevel -eq 'normal' -and $parsedTcp.RssState -eq 'enabled') 'netsh TCP parser extracts autotuning and RSS values'
-    Assert-POTest ($parsedTcp.EcnCapability -eq 'disabled' -and $parsedTcp.Timestamps -eq 'disabled' -and $parsedTcp.CongestionProvider -eq 'default') 'netsh TCP parser extracts ECN, timestamps, and congestion provider'
-    Assert-POTest ($parsedTcp.InitialRtoMilliseconds -eq '1000') 'netsh TCP parser extracts numeric fields as text'
-    $garbageParsed = ConvertFrom-PONetshTcpGlobalLines -Lines @('some localized text', 'another line')
-    Assert-POTest (-not $garbageParsed.Available) 'netsh TCP parser reports unrecognizable (localized) output as unavailable instead of guessing'
-
-    $defaultState = [pscustomobject]@{
-        Available = $true; Source = 'cim'; Error = $null
-        AutotuningLevel = 'Normal'; AutotuningLevelEffective = 'Normal'; RssState = 'Enabled'
-        EcnCapability = 'Disabled'; Timestamps = 'Disabled'; CongestionProvider = 'CUBIC'
-        RscState = 'Enabled on 1 adapter(s)'; InitialRtoMilliseconds = '1000'; MaxSynRetransmissions = '2'; NonSackRttResiliency = 'Disabled'
-    }
-    $defaultPlan = Get-PONetworkOptimizationPlan -TcpState $defaultState -LogicalProcessors 8
-    Assert-POTest (@($defaultPlan.Actions).Count -eq 0) 'A system at documented Windows defaults receives no TCP change'
-    Assert-POTest (@($defaultPlan.ReportOnly | Where-Object { $_.Id -eq 'tcp-ecn' }).Count -eq 1) 'ECN stays report-only on a default system'
-
-    $degradedState = $defaultState.PSObject.Copy()
-    $degradedState.AutotuningLevel = 'Disabled'; $degradedState.AutotuningLevelEffective = 'Disabled'; $degradedState.RssState = 'Disabled'
-    $degradedPlan = Get-PONetworkOptimizationPlan -TcpState $degradedState -LogicalProcessors 8
-    $degradedActions = @($degradedPlan.Actions)
-    Assert-POTest ($degradedActions.Count -eq 2) 'Disabled autotuning and disabled RSS on a multi-core system each produce exactly one corrective action'
-    $autotuningAction = @($degradedActions | Where-Object { $_.Id -eq 'tcp-autotuning' })[0]
-    Assert-POTest ($autotuningAction.Target -eq 'normal' -and (@($autotuningAction.Command) -join ' ') -match 'autotuninglevel=normal') 'The autotuning correction targets the documented Windows default (normal)'
-    $ecnActions = @($degradedPlan.Actions | Where-Object { $_.Id -like '*ecn*' -or $_.Id -like '*timestamp*' -or $_.Id -like '*rsc*' -or $_.Id -like '*congestion*' })
-    Assert-POTest ($ecnActions.Count -eq 0) 'ECN, timestamps, RSC, and the congestion provider are never changed automatically'
-
-    $singleCorePlan = Get-PONetworkOptimizationPlan -TcpState $degradedState -LogicalProcessors 1
-    Assert-POTest (@($singleCorePlan.Actions | Where-Object { $_.Id -eq 'tcp-rss' }).Count -eq 0) 'RSS is not forced on a single-logical-processor system'
-
-    $unavailableState = [pscustomobject]@{
-        Available = $false; Source = 'none'; Error = 'query failed'
-        AutotuningLevel = $null; AutotuningLevelEffective = $null; RssState = $null
-        EcnCapability = $null; Timestamps = $null; CongestionProvider = $null
-        RscState = $null; InitialRtoMilliseconds = $null; MaxSynRetransmissions = $null; NonSackRttResiliency = $null
-    }
-    $unavailablePlan = Get-PONetworkOptimizationPlan -TcpState $unavailableState -LogicalProcessors 8
-    Assert-POTest (@($unavailablePlan.Actions).Count -eq 0 -and @($unavailablePlan.Skipped).Count -eq 1) 'Unreadable TCP state leads to a documented skip, never a blind change'
-    Assert-POTest (@(Get-PONetworkReportNotes | Where-Object { $_ -match '(?i)ISP' }).Count -gt 0) 'The report explains that ping also depends on ISP, routing, and servers'
-}
-catch {
-    Assert-POTest $false 'Network module tests' $_.Exception.Message
-}
-
-try {
-    # Gaming module: allowlisted, reversible registry targets only.
-    $targets = @(Get-POGamingSettingTargets)
-    Assert-POTest ($targets.Count -eq 4) 'Exactly four gaming registry targets are defined'
-    $allowlist = @(
-        'Software\Microsoft\GameBar|AutoGameModeEnabled',
-        'Software\Microsoft\GameBar|AllowAutoGameMode',
-        'System\GameConfigStore|GameDVR_Enabled',
-        'Software\Microsoft\Windows\CurrentVersion\GameDVR|AppCaptureEnabled'
-    )
-    $outsideAllowlist = @()
-    foreach ($target in $targets) {
-        if ($target.Hive -ne 'CurrentUser') { $outsideAllowlist += "$($target.Id): hive is not CurrentUser" }
-        if ("$($target.SubKey)|$($target.ValueName)" -notin $allowlist) { $outsideAllowlist += "$($target.Id): key is not on the Core restore allowlist" }
-    }
-    Assert-POTest ($outsideAllowlist.Count -eq 0) 'Every gaming target stays inside the HKCU restore allowlist' ($outsideAllowlist -join '; ')
-    $gameMode = @($targets | Where-Object { $_.ValueName -eq 'AutoGameModeEnabled' })[0]
-    Assert-POTest ([int]$gameMode.DesiredValue -eq 1) 'Game Mode is enabled, not disabled'
-    $dvr = @($targets | Where-Object { $_.ValueName -eq 'GameDVR_Enabled' })[0]
-    Assert-POTest ([int]$dvr.DesiredValue -eq 0 -and [bool]$dvr.RequiresSignOut) 'Background Game DVR is disabled and flagged as needing sign-out/reboot to fully apply'
-    $coreText = [System.IO.File]::ReadAllText((Join-Path $repoRoot 'src\core\PlatinumOptimizer.Core.psm1'), [System.Text.Encoding]::UTF8)
-    foreach ($entry in $allowlist) {
-        $parts = $entry.Split('|')
-        Assert-POTest ($coreText.Contains($parts[0]) -and $coreText.Contains($parts[1])) "Core backup/restore allowlist covers $($parts[1])"
-    }
-    Assert-POTest (-not ($coreText -match "(?i)Set-Service|Stop-Service|sc config|sc stop")) 'Core never changes or stops Windows services'
-    $gamingText = [System.IO.File]::ReadAllText((Join-Path $repoRoot 'src\core\PlatinumOptimizer.Gaming.psm1'), [System.Text.Encoding]::UTF8)
-    Assert-POTest ($gamingText -notmatch '(?i)Stop-Process|taskkill') 'The gaming module never terminates processes'
-}
-catch {
-    Assert-POTest $false 'Gaming module tests' $_.Exception.Message
-}
-
-try {
-    # Add-POBackupFile keeps the checksum ledger valid, and targeted status
-    # updates touch only the addressed change record.
-    $fileRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('PlatinumOptimizerFileLedger_' + [guid]::NewGuid().ToString('N'))
-    $fileBackup = Join-Path $fileRoot 'engine-backup'
-    New-Item -ItemType Directory -Path (Join-Path $fileBackup 'network') -Force | Out-Null
-    $seedManifest = [pscustomobject][ordered]@{
-        schemaVersion = 1; id = 'engine-backup'; status = 'VALID'; modifiedSections = @(); changes = @(); restoreHistory = @(); files = @()
-    }
-    Set-Content -LiteralPath (Join-Path $fileBackup 'manifest.json') -Value ($seedManifest | ConvertTo-Json -Depth 6) -Encoding UTF8
-    $emptyValidation = Test-POBackup -Path $fileBackup
-    Assert-POTest (-not $emptyValidation.Valid) 'Backup validator rejects an empty file inventory before the first snapshot'
-    $added = Add-POBackupFile -BackupPath $fileBackup -RelativePath 'network\tcp-global-before.json' -Content '{"AutotuningLevel":"normal"}'
-    $afterAdd = Test-POBackup -Path $fileBackup
-    Assert-POTest ($afterAdd.Valid) 'Add-POBackupFile registers the new file so checksum validation still passes'
-    Assert-POTest ($added.SHA256 -match '^[A-F0-9]{64}$') 'Add-POBackupFile records a SHA-256 checksum'
-    $traversalRejected = $false
-    try { [void](Add-POBackupFile -BackupPath $fileBackup -RelativePath '..\escape.json' -Content 'x') } catch { $traversalRejected = $true }
-    Assert-POTest $traversalRejected 'Add-POBackupFile rejects paths outside the backup directory'
-
-    Add-POBackupChange -BackupPath $fileBackup -Section registry -Change ([pscustomobject][ordered]@{ section = 'registry'; id = 'game-mode-auto'; status = 'APPLYING' })
-    Add-POBackupChange -BackupPath $fileBackup -Section registry -Change ([pscustomobject][ordered]@{ section = 'registry'; id = 'game-dvr-enabled'; status = 'APPLYING' })
-    Update-POBackupChangeStatus -BackupPath $fileBackup -Section registry -ChangeId 'game-mode-auto' -Status 'APPLIED_VERIFIED' -Message 'first value verified'
-    $fileManifest = Get-Content -LiteralPath (Join-Path $fileBackup 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-    $firstChange = @($fileManifest.changes | Where-Object { $_.id -eq 'game-mode-auto' })[0]
-    $secondChange = @($fileManifest.changes | Where-Object { $_.id -eq 'game-dvr-enabled' })[0]
-    Assert-POTest ($firstChange.status -eq 'APPLIED_VERIFIED') 'Targeted status update reaches the addressed registry change'
-    Assert-POTest ($secondChange.status -eq 'APPLYING') 'Targeted status update leaves other changes untouched'
-    $badIdRejected = $false
-    try { Update-POBackupChangeStatus -BackupPath $fileBackup -Section registry -ChangeId 'does-not-exist' -Status 'APPLIED_VERIFIED' } catch { $badIdRejected = $true }
-    Assert-POTest $badIdRejected 'A status update for an unknown change id is rejected'
-    Remove-Item -LiteralPath $fileRoot -Recurse -Force
-}
-catch {
-    Assert-POTest $false 'Backup file ledger tests' $_.Exception.Message
+    Assert-POTest $false 'CMD-only architecture tests' $_.Exception.Message
 }
 
 Write-Host ''

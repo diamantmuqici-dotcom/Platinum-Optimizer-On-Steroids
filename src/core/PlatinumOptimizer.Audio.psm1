@@ -255,6 +255,14 @@ function Restore-POAudioSection {
     if (-not $current.Readable) { throw 'The current audio state could not be read; restore was blocked.' }
     $alreadySame = ($current.Exists -eq [bool]$original.Exists) -and (-not $current.Exists -or (([string]$current.Kind -eq [string]$original.Kind) -and ([int]$current.Data -eq [int]$original.Data)))
     if ($alreadySame) { return }
+    $targetProperty = $change[0].PSObject.Properties['targetValue']
+    $expectedTarget = 0
+    if ($null -eq $targetProperty -or -not [int]::TryParse([string]$targetProperty.Value, [ref]$expectedTarget)) {
+        throw 'The backup does not record a verifiable audio target; current audio settings were left untouched.'
+    }
+    if (-not $current.Exists -or [string]$current.Kind -ne 'DWord' -or [int]$current.Data -ne $expectedTarget) {
+        throw 'The audio communications value changed after Platinum Optimizer ran; refusing to overwrite the newer value.'
+    }
     Set-PORegValueState -State $original
     $verify = Get-PORegValueState -Hive ([string]$original.Hive) -SubKey ([string]$original.SubKey) -ValueName ([string]$original.ValueName)
     if (-not $verify.Readable -or $verify.Exists -ne [bool]$original.Exists) { throw 'Audio restore verification failed after writing the original value.' }

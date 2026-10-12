@@ -1,185 +1,35 @@
-# Implementation report — Platinum On Steroids expansion (v1.1.0)
+# Implementation report — CMD-only automatic optimizer
 
-> **Historical document (v1.x WPF application).** The graphical interface
-> described here was removed in v2.0; see
-> [`IMPLEMENTATION-REPORT-V2.md`](IMPLEMENTATION-REPORT-V2.md) for the
-> current CMD-only automatic engine. The power-plan, audio, and display
-> module internals documented below are still in use (audio/display
-> primarily for restoring v1.x backups and read-only assessment).
+Date: 2026-10-12 · Application version: 2.0.0
 
-Date: 2026-10-12 · Branch: `arena/8e6acf82-platinum-optimizer-on-steroids` · Base: `ce99daba`
+## Delivered
 
-This report states exactly what was implemented, how it was verified in this
-workspace, and what still requires verification on real Windows hardware. It
-does not claim FPS, latency, or thermal improvements.
+- Replaced the WPF/XAML dashboard entry point with a console-only PowerShell engine and a small CMD launcher. The old compatibility `.cmd` now delegates to the new launcher; the archived V9.3 command list remains non-executable text.
+- Added Windows UAC handoff for automatic/recovery modes, validated command-line modes (`--scan`, `--benchmark`, `--restore`, `--self-test`), safe repository-relative paths, visible foreground execution, meaningful exit codes, and a final keypress wait. Elevation is checked from the Windows security token rather than `net session` (which can fail when the Server service is disabled), and the launcher elevates Windows PowerShell with a quoted script path instead of trying to execute the `.bat` through `Start-Process`.
+- Added a console assessment covering Windows/hardware, power schemes/processor settings, adapters/TCP state, display/audio, gaming settings, security, storage, reboot indicators, and aggregate resource counters. Optional data remains unknown when Windows does not expose it.
+- Reworked the power workflow so its checksum-verified application backup is created **before** any system change, including the optional System Restore point. The previous active plan must export successfully. An existing Platinum scheme is also exported and its documented processor values are captured for rollback.
+- The automatic plan is cloned from the active plan (Balanced fallback), reused by exact name, configured only with conservative documented processor values, and activated only after GUID read-back. Core parking, boost, network, capture, display, services, startup, storage, security, and undocumented registry settings remain unchanged.
+- Added per-run human-readable logs and structured JSON reports with truthful applied/restored/already-optimized/skipped/failed/unverified results. `--restore` records its source backup, validates the selected manifest and checksums, captures and verifies a fresh pre-restore snapshot for the affected sections, requires non-empty exports of the active and existing Platinum power schemes, and restores only recorded supported changes. Existing-plan recovery uses the persisted per-side write history, restores only attempted sides still at the optimizer target, skips sides already at their baseline, and blocks on newer conflicting values. Successfully restored sections are not repeatedly selected; another `--restore` can step back to an earlier eligible run.
+- Removed the graphical dashboard and the obsolete self-expanding BAT builder/runtime payload. The primary `.bat` is now a normal ASCII CMD launcher.
 
-## 1. What was delivered
+## Verification performed in this workspace
 
-### 1.1 Power plan: Platinum On Steroids (new module `src/core/PlatinumOptimizer.Power.psm1`)
+This workspace is not Windows. PowerShell system changes, UAC, System Restore, `powercfg`, WMI/CIM hardware inventory, and Windows recovery cannot be executed here.
 
-- **Detection:** active plan GUID, full plan enumeration, and presence check
-  for the exact name `Platinum On Steroids` (`Get-POPlatinumPlanInfo`).
-- **Idempotent creation:** if the plan exists it is queried and validated —
-  never duplicated. If absent, it is created with
-  `powercfg /duplicatescheme` from the documented High Performance scheme,
-  renamed exactly `Platinum On Steroids`, verified in the scheme list, and a
-  `.pow` export is saved. A rename failure deletes the unnamed duplicate.
-- **Presets inside one plan:** Gaming, Competitive (separate thermal/power
-  confirmation), Balanced, Laptop. All values live in
-  `src/data/power-settings.json` with Microsoft-documented GUIDs only
-  (verified against Microsoft documentation mirrors during development).
-  AC and DC are configured separately; laptop presets cap the processor
-  ceiling on battery (≤95%, laptop 85%) and use passive cooling on battery.
-  Sleep is never disabled: explicit 15–60 minute sleep timeouts.
-- **Apply with verification:** every `powercfg /setacvalueindex` /
-  `/setdcvalueindex` write is re-read via `powercfg /qh` and compared.
-  Settings the platform rejects (boost policy and core-parking settings on
-  systems where Windows manages them internally) are skipped as
-  NOT_SUPPORTED and listed in the result — never forced, never reported as
-  applied. Split-GUID core-parking settings use their documented AC/DC GUID
-  variants.
-- **Activation:** separate explicit step, verified by re-reading the active
-  scheme GUID; refusal paths leave the previous plan active.
-- **Restore:** `Restore-POPreviousPowerPlan` reactivates the recorded
-  previous plan (re-importing its `.pow` export if it was removed) and never
-  deletes the Platinum plan. Restore Center restores `platinum-power-plan`
-  ledger records through the same guarded path (refuses if the user changed
-  plans afterwards). Explicit removal of the Platinum plan exists as a
-  separate action and is blocked while the plan is active.
-- **Quick CPU & core parking:** read-only processor setting report from the
-  active plan; Quick CPU installation detection (never bundled/launched);
-  the documented core-parking knobs are what the plan configures where the
-  platform exposes them.
-- **Workflow integration:** `Invoke-POPlatinumPlanWorkflow` runs preflight →
-  backup (with Platinum state embedded, checksummed) → create/update →
-  preset apply → ledger record → optional activation → state persistence.
-  Any failure returns FAILED with the previous plan left active.
+| Check | Result |
+|---|---|
+| PowerShell structural sanity scan | Passed for launcher, engine, all PowerShell modules, and Windows test harness |
+| Tree-sitter PowerShell grammar check | Passed; parser noted documented grammar quirks in existing Core/test constructs |
+| JSON catalogs parse | Passed; all 7 data catalogs parsed |
+| Python CLI/repository contract tests | Passed; 13 tests |
+| Windows PowerShell test harness (`tests/Run-Tests.ps1`) | Authored but not executed; Windows PowerShell is unavailable here |
+| Live Windows integration | Not performed; no Windows host, UAC, `powercfg`, WMI/CIM, or Windows APIs are available |
 
-### 1.2 Audio & Headphones (new module `src/core/PlatinumOptimizer.Audio.psm1`)
+## Important scope and honesty
 
-- **Detection:** `Win32_SoundDevice`, PnP `AudioEndpoint` inventory, Audiosrv
-  state, connection-type inference from PnP ids (USB / Bluetooth / HDAudio /
-  GPU display audio), always labeled as inference. Unexposed fields (default
-  endpoint, sample rate, enhancements, spatial state, exclusive mode,
-  latency) are reported as Unknown with the supported UI path — never
-  fabricated. Handles missing/disconnected devices via guarded queries.
-- **Seven presets:** Competitive FPS, Positional Audio, Stereo Headphones,
-  Surround/Spatial, Music & General, Microphone & Voice Chat, Restore
-  Original Audio Settings. Each preset documents what it changes and why.
-- **Change surface:** the single automatic change is the documented
-  communications-activity value (`UserDuckingPreference`), captured before
-  the first change, written as an exact DWord, read back, recorded in the
-  backup ledger (`audio` section), and restorable from either the module
-  state or Restore Center. No microphone is disabled, default devices are
-  never moved, and no codec/driver/third-party audio software is installed.
-  Game-native guidance (CS2 HRTF, Fortnite headphone mode, Rust), spatial
-  conflict avoidance, Bluetooth codec caveats, and manual `mmsys.cpl` steps
-  are delivered as text; nothing is claimed about latency.
-- Audio changes are fully independent of the gaming optimization workflow.
+- The application does not claim a particular FPS, frame-time, thermal, ping, or latency gain.
+- The automatic writer currently changes only the Platinum power scheme's supported processor settings and activation state. Network, display, Game Mode/capture, startup/services, storage, memory, and security settings are detected and left unchanged.
+- System Restore is supplemental and best effort. It is never enabled by the optimizer; verified local configuration and power-scheme exports are required before the optional restore-point attempt, which occurs before plan creation or setting changes.
+- The custom plan is created/reused and activated automatically when preflight and verification pass. A successful recovery reactivates the prior plan; it leaves a newly created Platinum plan installed but inactive.
 
-### 1.3 Display & Colors (new module `src/core/PlatinumOptimizer.Display.psm1`)
-
-- **Detection:** active displays via `EnumDisplayDevices`/`EnumDisplaySettings`
-  (device name, adapter/vendor, monitor PnP identity, current mode, all
-  enumerated modes at the current resolution, highest available refresh,
-  primary flag), Windows Color Management ICC association (read-only),
-  HDR reported as Unknown where the API cannot expose it, DDC/CI read-only
-  capability probe via `dxva2`, and detection of NVIDIA/AMD/Intel color
-  control surfaces (guidance only).
-- **Nine profiles:** Platinum Competitive, CS2 Visibility, Fortnite
-  Visibility, Rust Visibility, Natural Colors, Movie & Media, HDR Gaming
-  (guidance-only, opens Windows HDR settings), Color-Accurate/Creator,
-  Restore Previous Display Configuration.
-- **Color-corruption prevention (critical requirement):**
-  - gamma ramps are computed **absolutely** from the identity curve —
-    repeated applies cannot accumulate;
-  - the identical curve is applied to R/G/B — the code path cannot introduce
-    a green or any tint;
-  - gamma clamped to 0.85–1.15; no maximum-saturation default exists anywhere;
-  - original ramp + mode captured per display before the first change;
-  - targeting is per selected display; other displays are untouched;
-  - no GPU registry value is ever written; vendor saturation is manual-only;
-  - driver read-back verification — a ramp the driver ignores (e.g., under
-    HDR) is reported as FAILED, not success;
-  - refresh changes go through `CDS_TEST` first and are verified after.
-- **Scope honesty:** profiles state whether they change the GPU output of one
-  display, and game notes state that global ramp changes cannot be limited to
-  a single game. No game memory access, anti-cheat interaction, or injection.
-
-### 1.4 Unified dashboard
-
-- New pages: **Power plan**, **Audio & Headphones**, **Display & Colors**,
-  each with refresh, preview/confirm, apply, restore, and status surfaces.
-- The main button is now **OPTIMIZE MY PC — PLATINUM ON STEROIDS** and runs
-  the combined 13-step workflow: detect system/hardware → identify displays
-  and audio devices → inspect power plan/CPU state → inspect network →
-  inspect input settings → inspect GPU capabilities → generate hardware-aware
-  recommendations (Gaming vs Laptop preset by form factor) → capture a
-  baseline sample → create backup + change manifest → apply permitted
-  low-risk changes (Platinum plan with confirmation, supported TCP baseline,
-  DNS cache flush, Ethernet power-management guard) → verify each change →
-  show applied/skipped results → offer restoration. Audio presets, display
-  profiles, and DNS resolver changes require their own explicit consent and
-  are listed as not-auto-applied.
-
-### 1.5 Single-file release: `PlatinumOptimizer.bat`
-
-- cmd/PowerShell polyglot: the ASCII-only batch section launches built-in
-  Windows PowerShell 5.1, which reads the BAT itself, extracts the payload,
-  and runs it in memory. The payload expands 14 embedded files (engine,
-  4 modules, 8 data files, XAML UI, test harness) **byte-exact** (base64)
-  into `%LOCALAPPDATA%\PlatinumOptimizer\runtime\<build-id>` once per build,
-  then starts the normal engine. Supports `-Scan` and `-SelfTest`.
-- No separate scripts at runtime, no downloads, no Python/third-party
-  dependencies; only Windows PowerShell 5.1, which ships with supported
-  Windows 10/11 desktop editions.
-- Generated by `tools/build_single_file.py`; `--check` re-verifies marker
-  uniqueness, ASCII batch section, and byte-exact embedding.
-
-## 2. Verification performed in this workspace (Linux)
-
-| Check | Tool | Result |
-|---|---|---|
-| All data catalogs parse | `python3` JSON | 7/7 OK |
-| XAML parses | `xml.dom.minidom` | OK |
-| PowerShell structural scan (strings/herestrings/comments/brackets) | `tools/ps_syntax_sanity.py` | 6/6 sources OK |
-| PowerShell parse with the tree-sitter PowerShell grammar | `tools/ps_tree_sitter_check.py` | OK (remaining nodes are documented grammar quirks also present at the pre-change baseline) |
-| New modules parse with zero findings | tree-sitter gate | Power/Audio/Display clean |
-| Single-file release byte-exactness | `tools/build_single_file.py` | 14/14 embedded files identical to repo sources |
-| Release payload parseability | tree-sitter on extracted payload | CLEAN |
-| Release structural rules (marker unique, ASCII batch, launcher flags) | `tests/Run-Tests.ps1` (runs on Windows) | authored |
-| Preset/policy logic tests (ranges, documented-GUID subset, gamma math, parsers, inference, ledger sections) | `tests/Run-Tests.ps1` pure section | authored |
-
-Because this workspace has no Windows PowerShell or Windows 10/11 runtime,
-the test harness itself executes only on Windows (see KNOWN-LIMITATIONS.md).
-
-## 3. Acceptance-test status (from the task brief)
-
-| Acceptance item | How it is satisfied | Verified here | Needs Windows |
-|---|---|---|---|
-| `Platinum On Steroids` can be created or safely updated | idempotent create/validate path with exit-code + re-read verification | logic + data | powercfg execution |
-| Existing power plans remain intact | no `/delete` anywhere except explicit self-removal; plan-list delta logged | code review | runtime confirmation |
-| Original active plan can be restored | state file + ledger + `.pow` re-import; Restore Center branch | logic | powercfg execution |
-| AC and battery behavior handled | per-AC/DC preset values; battery caps; battery/unknown blocks in workflow | data validation | runtime confirmation |
-| CPU and core-parking changes verified | every setting re-read via `/qh`; unsupported settings skipped | parser tests | powercfg execution |
-| Audio discovery handles missing devices | guarded queries with explicit failure objects | code review | device states |
-| Audio profiles preserve original settings | capture-before-change + ledger + two restore paths | logic | registry round-trip |
-| Monitor detection handles multiple displays | per-adapter enumeration; per-display targeting; primary default | code review | multi-monitor rig |
-| Color changes do not accumulate / corrupt | absolute ramps, channel-identical curves, clamps, captured originals | gamma math tests | driver behavior |
-| Unsupported display APIs produce clear messages | read-back mismatch → FAILED with explanation; DDC probe wording | code review | HDR/DDC hardware |
-| BAT remains single-file core release | one 608 KB file; runtime expansion only | byte-exact check | first-run expansion |
-| PowerShell 5.1 compatibility | no PS7-only syntax; `#requires -Version 5.1` retained | grammar + review | actual 5.1 run |
-| Failure paths never report success | all apply functions return FAILED on exit code/verification mismatch | code review | injected failures |
-| Rollback works for supported operations | Restore Center sections power/network/registry/audio/display | logic | runtime |
-| Documentation covers unverifiable items | KNOWN-LIMITATIONS.md §"Module limits introduced in 1.1" | written | — |
-
-## 4. Known unresolved items
-
-- **No real-hardware run yet:** powercfg behavior on policy-locked machines,
-  AMD boost-mode exposure, core-parking visibility per generation, gamma
-  behavior under HDR/MPO, and DDC/CI responsiveness must be confirmed on
-  physical systems (checklist items 11–14 in KNOWN-LIMITATIONS.md).
-- **Quick CPU:** detection only; its UI cannot be driven programmatically
-  without vendor APIs, which the project policy excludes.
-- **Per-game color isolation:** not claimed; the report and UI state that
-  desktop gamma ramps are global by nature.
+See [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for Windows integration requirements and the release checklist. See [`REFERENCES.md`](REFERENCES.md) for the supported Windows interfaces used by the automatic pipeline.

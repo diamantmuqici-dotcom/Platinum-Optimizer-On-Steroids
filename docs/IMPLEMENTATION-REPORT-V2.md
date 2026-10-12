@@ -1,10 +1,14 @@
-# Implementation report — v2.0.0 CMD engine (complete UI removal)
+# Historical implementation report — v2.0.0 single-file CMD engine (superseded)
 
-Date: 2026-10-12 · Branch: `arena/e3ce8ca9-platinum-optimizer-on-steroids` · Base: `71ecf2a0`
+Date: 2026-10-12 · Original branch: `arena/e3ce8ca9-platinum-optimizer-on-steroids` · Base: `71ecf2a0`
 
-This report states exactly what was changed, how it was verified in this
-workspace, and what still requires verification on real Windows hardware.
-It does not claim FPS, latency, or thermal improvements.
+**Historical record only.** This report describes the earlier single-file CMD
+implementation on upstream `main`; it is retained for context, not as the
+specification for the current modular launcher. The current behavior and
+verification status are documented in [`IMPLEMENTATION-REPORT.md`](IMPLEMENTATION-REPORT.md)
+and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md). In particular, the current
+automatic pipeline does not write network, Game Mode, or capture settings;
+those categories are assessed read-only.
 
 ## 1. Mission
 

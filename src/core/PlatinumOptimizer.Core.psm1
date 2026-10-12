@@ -47,10 +47,75 @@ function Test-POIsAdministrator {
     if (-not (Test-POIsWindows)) { return $false }
     try {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        $principal = [Security.Principal.WindowsPrincipal]::new($identity)
         return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     }
     catch { return $false }
+}
+
+function Invoke-POExternalCommand {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$FilePath,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Arguments,
+        [ValidateRange(1, 600)][int]$TimeoutSeconds = 30
+    )
+    # All in-repository calls pass switches, GUIDs, or Windows paths. Quote
+    # each token so paths with spaces remain one argument. Windows paths
+    # cannot contain a double quote, and rejecting one avoids shell ambiguity.
+    $quotedArguments = New-Object System.Collections.Generic.List[string]
+    foreach ($argument in $Arguments) {
+        $value = [string]$argument
+        if ($value.Contains('"')) { throw 'External command arguments may not contain a double quote.' }
+        [void]$quotedArguments.Add(('"{0}"' -f $value))
+    }
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $FilePath
+    $startInfo.Arguments = $quotedArguments -join ' '
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $timedOut = $false
+    $exitCode = -1
+    $stdoutText = ''
+    $stderrText = ''
+    try {
+        if (-not $process.Start()) { throw "Could not start external command '$FilePath'." }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            $timedOut = $true
+            try { $process.Kill() } catch { }
+            try { $process.WaitForExit() } catch { }
+            $exitCode = -2
+        }
+        else {
+            $process.WaitForExit()
+            $exitCode = [int]$process.ExitCode
+        }
+        try { $stdoutText = [string]$stdoutTask.Result } catch { $stdoutText = '' }
+        try { $stderrText = [string]$stderrTask.Result } catch { $stderrText = '' }
+    }
+    finally {
+        $timer.Stop()
+        $process.Dispose()
+    }
+    $outputLines = @($stdoutText -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $errorLines = @($stderrText -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    return [pscustomobject][ordered]@{
+        FilePath = $FilePath
+        Arguments = @($Arguments)
+        ExitCode = $exitCode
+        TimedOut = $timedOut
+        TimeoutSeconds = $TimeoutSeconds
+        DurationMilliseconds = [long]$timer.ElapsedMilliseconds
+        Output = $outputLines
+        ErrorOutput = $errorLines
+    }
 }
 
 function Get-POVendor {
@@ -72,6 +137,14 @@ function ConvertTo-POBytesGB {
     if ($null -eq $Value) { return $null }
     try { return [math]::Round(([double]$Value / 1GB), 2) }
     catch { return $null }
+}
+
+function ConvertTo-PONullableInteger {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $null }
+    $parsed = 0
+    if ([int]::TryParse([string]$Value, [ref]$parsed)) { return $parsed }
+    return $null
 }
 
 function Get-POCimInstances {
@@ -148,14 +221,15 @@ function Get-POSystemSnapshot {
     }
 
     $cpuArchitecture = 'Unknown'
-    if ($processors.Count -gt 0) {
-        switch ([int]$processors[0].Architecture) {
+    $cpuArchitectureCode = if ($processors.Count -gt 0) { ConvertTo-PONullableInteger $processors[0].Architecture } else { $null }
+    if ($null -ne $cpuArchitectureCode) {
+        switch ([int]$cpuArchitectureCode) {
             0 { $cpuArchitecture = 'x86' }
             5 { $cpuArchitecture = 'ARM' }
             6 { $cpuArchitecture = 'Itanium' }
             9 { $cpuArchitecture = 'x64' }
             12 { $cpuArchitecture = 'ARM64' }
-            default { $cpuArchitecture = "SMBIOS/WMI code $($processors[0].Architecture)" }
+            default { $cpuArchitecture = "SMBIOS/WMI code $cpuArchitectureCode" }
         }
     }
     $physicalCores = 0; $logicalCores = 0
@@ -173,10 +247,10 @@ function Get-POSystemSnapshot {
         Architecture = $cpuArchitecture
         PhysicalCores = if ($physicalCores -gt 0) { $physicalCores } else { $null }
         LogicalProcessors = if ($logicalCores -gt 0) { $logicalCores } else { $null }
-        MaximumClockReportedMHz = if ($processors.Count -gt 0) { [int]$processors[0].MaxClockSpeed } else { $null }
-        CurrentClockReportedMHz = if ($processors.Count -gt 0) { [int]$processors[0].CurrentClockSpeed } else { $null }
-        L2CacheKB = if ($processors.Count -gt 0) { [int]$processors[0].L2CacheSize } else { $null }
-        L3CacheKB = if ($processors.Count -gt 0) { [int]$processors[0].L3CacheSize } else { $null }
+        MaximumClockReportedMHz = if ($processors.Count -gt 0) { ConvertTo-PONullableInteger $processors[0].MaxClockSpeed } else { $null }
+        CurrentClockReportedMHz = if ($processors.Count -gt 0) { ConvertTo-PONullableInteger $processors[0].CurrentClockSpeed } else { $null }
+        L2CacheKB = if ($processors.Count -gt 0) { ConvertTo-PONullableInteger $processors[0].L2CacheSize } else { $null }
+        L3CacheKB = if ($processors.Count -gt 0) { ConvertTo-PONullableInteger $processors[0].L3CacheSize } else { $null }
         VirtualizationFirmwareEnabled = if ($processors.Count -gt 0) { $processors[0].VirtualizationFirmwareEnabled } else { $null }
         Generation = 'Not inferred from marketing-name text'
         PerformanceEfficiencyCoreTopology = 'Not exposed reliably by the generic WMI query'
@@ -199,7 +273,7 @@ function Get-POSystemSnapshot {
             ReportedVRAMGB = if ($adapterRam) { ConvertTo-POBytesGB $adapterRam } else { $null }
             SharedMemoryGB = $null
             ResolutionReportedByAdapter = $resolution
-            RefreshRateReportedByAdapterHz = if ($controller.CurrentRefreshRate) { [int]$controller.CurrentRefreshRate } else { $null }
+            RefreshRateReportedByAdapterHz = if ((ConvertTo-PONullableInteger $controller.CurrentRefreshRate) -gt 0) { ConvertTo-PONullableInteger $controller.CurrentRefreshRate } else { $null }
             PnpDeviceId = [string]$controller.PNPDeviceID
         }
     }
@@ -209,8 +283,8 @@ function Get-POSystemSnapshot {
     foreach ($module in $physicalMemory) {
         $memoryModules += [pscustomobject][ordered]@{
             CapacityGB = ConvertTo-POBytesGB $module.Capacity
-            SpeedMHz = if ($module.ConfiguredClockSpeed) { [int]$module.ConfiguredClockSpeed } elseif ($module.Speed) { [int]$module.Speed } else { $null }
-            MemoryTypeCode = if ($module.SMBIOSMemoryType) { [int]$module.SMBIOSMemoryType } elseif ($module.MemoryType) { [int]$module.MemoryType } else { $null }
+            SpeedMHz = if ((ConvertTo-PONullableInteger $module.ConfiguredClockSpeed) -gt 0) { ConvertTo-PONullableInteger $module.ConfiguredClockSpeed } elseif ((ConvertTo-PONullableInteger $module.Speed) -gt 0) { ConvertTo-PONullableInteger $module.Speed } else { $null }
+            MemoryTypeCode = if ((ConvertTo-PONullableInteger $module.SMBIOSMemoryType) -gt 0) { ConvertTo-PONullableInteger $module.SMBIOSMemoryType } elseif ((ConvertTo-PONullableInteger $module.MemoryType) -gt 0) { ConvertTo-PONullableInteger $module.MemoryType } else { $null }
             Manufacturer = [string]$module.Manufacturer
             DeviceLocator = [string]$module.DeviceLocator
         }
@@ -490,16 +564,26 @@ function Get-POPowerPlans {
     if (-not (Test-POIsWindows)) { return @() }
     $activeGuid = Get-POActivePowerPlanGuid
     try {
-        $raw = @(& powercfg.exe /list 2>&1)
+        if (Get-Command Invoke-POExternalCommand -ErrorAction SilentlyContinue) {
+            $result = Invoke-POExternalCommand -FilePath 'powercfg.exe' -Arguments @('/list') -TimeoutSeconds 30
+            if ($result.TimedOut) { throw 'powercfg /list timed out after 30 seconds.' }
+            if ($result.ExitCode -ne 0) { throw "powercfg /list returned exit code $($result.ExitCode): $(($result.ErrorOutput -join ' ').Trim())" }
+            $raw = @($result.Output)
+        }
+        else {
+            $raw = @(& powercfg.exe /list 2>&1)
+            $listExitCode = $LASTEXITCODE
+            if ($listExitCode -ne 0) { throw "powercfg /list returned exit code $listExitCode." }
+        }
         foreach ($line in $raw) {
             $match = [regex]::Match([string]$line, '(?i)(?<guid>\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?)\s*\((?<name>[^)]+)\)')
             if ($match.Success) {
-                $guid = $match.Groups['guid'].Value.Trim('{}')
+                $guid = $match.Groups['guid'].Value.Trim('{}').ToLowerInvariant()
                 $plans += [pscustomobject][ordered]@{ Guid = $guid; Name = $match.Groups['name'].Value.Trim(); IsActive = ($guid -eq $activeGuid) }
             }
         }
     }
-    catch { }
+    catch { throw "Could not enumerate installed Windows power plans: $($_.Exception.Message)" }
     return @($plans | Sort-Object -Property Name, Guid)
 }
 
@@ -508,7 +592,12 @@ function Get-POActivePowerPlanGuid {
     param()
     if (-not (Test-POIsWindows)) { return $null }
     try {
-        $raw = @(& powercfg.exe /getactivescheme 2>&1) -join "`n"
+        if (Get-Command Invoke-POExternalCommand -ErrorAction SilentlyContinue) {
+            $result = Invoke-POExternalCommand -FilePath 'powercfg.exe' -Arguments @('/getactivescheme') -TimeoutSeconds 30
+            if ($result.ExitCode -ne 0 -or $result.TimedOut) { return $null }
+            $raw = @($result.Output) -join "`n"
+        }
+        else { $raw = @(& powercfg.exe /getactivescheme 2>&1) -join "`n" }
         $match = [regex]::Match($raw, '(?i)\{?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\}?')
         if ($match.Success) { return $match.Groups[1].Value.ToLowerInvariant() }
     }
@@ -1332,37 +1421,7 @@ function Get-PORegistrySnapshotKeys {
 }
 
 function Get-POBackupRoot {
-    # Elevated runs keep machine-wide backups under ProgramData (documented,
-    # reliable, survives user-profile changes). Non-elevated runs fall back to
-    # the per-user local state root so read-only flows still work.
-    if ((Test-POIsWindows) -and (Test-POIsAdministrator) -and -not [string]::IsNullOrWhiteSpace($env:ProgramData)) {
-        return (Join-Path $env:ProgramData 'PlatinumOptimizer\Backups')
-    }
     return (Join-Path (Get-POStateRoot) 'Backups')
-}
-
-function Get-POBackupSearchRoots {
-    # Every location where Platinum Optimizer backups may live: the current
-    # ProgramData root (elevated) and the per-user local root (v1.x backups and
-    # non-elevated runs). Restore/validation accept any of these roots.
-    $roots = @()
-    if ((Test-POIsWindows) -and -not [string]::IsNullOrWhiteSpace($env:ProgramData)) {
-        $roots += (Join-Path $env:ProgramData 'PlatinumOptimizer\Backups')
-    }
-    try { $roots += (Join-Path (Get-POStateRoot) 'Backups') } catch { }
-    return @($roots | Select-Object -Unique)
-}
-
-function Test-POPathInsideBackupRoots {
-    [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$Path)
-    $fullPath = [System.IO.Path]::GetFullPath($Path)
-    $comparison = Get-POPathComparison
-    foreach ($root in @(Get-POBackupSearchRoots)) {
-        $prefix = Get-POPathRootPrefix -Path $root
-        if ($fullPath.StartsWith($prefix, $comparison)) { return $true }
-    }
-    return $false
 }
 
 function Write-POJsonAtomic {
@@ -1458,7 +1517,9 @@ function New-POBackup {
         [int]$NetworkInterfaceIndex = -1,
         [AllowNull()][psobject]$PlatinumState = $null,
         [AllowNull()][psobject]$AudioState = $null,
-        [AllowNull()][psobject]$DisplayState = $null
+        [AllowNull()][psobject]$DisplayState = $null,
+        [AllowNull()][string]$PlatinumPlanGuid = $null,
+        [AllowNull()][psobject]$PowerSettingsSnapshot = $null
     )
     if (-not (Test-POIsWindows)) { throw 'Backups can only be created on Windows.' }
     $root = Get-POBackupRoot
@@ -1480,19 +1541,44 @@ function New-POBackup {
     $activeGuid = Get-POActivePowerPlanGuid
     $powerExport = $null
     if ($activeGuid) {
-        $powerExport = Join-Path $backupPath 'power\active-plan.pow'
+        $activeExportPath = Join-Path $backupPath 'power\active-plan.pow'
         try {
-            & powercfg.exe /export $powerExport $activeGuid 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $powerExport -PathType Leaf)) {
-                $warnings += "Power plan export returned exit code $LASTEXITCODE; the previous active GUID was still recorded."
-                $powerExport = $null
+            if (Get-Command Invoke-POExternalCommand -ErrorAction SilentlyContinue) {
+                $activeExportResult = Invoke-POExternalCommand -FilePath 'powercfg.exe' -Arguments @('/export', $activeExportPath, $activeGuid) -TimeoutSeconds 30
+                if ($activeExportResult.ExitCode -eq 0 -and -not $activeExportResult.TimedOut -and (Test-Path -LiteralPath $activeExportPath -PathType Leaf) -and (Get-Item -LiteralPath $activeExportPath -Force).Length -gt 0) { $powerExport = $activeExportPath }
+                else { $warnings += "Power plan export did not verify (exit code $($activeExportResult.ExitCode), timeout=$($activeExportResult.TimedOut)); the active GUID was still recorded." }
+            }
+            else {
+                & powercfg.exe /export $activeExportPath $activeGuid 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $activeExportPath -PathType Leaf) -and (Get-Item -LiteralPath $activeExportPath -Force).Length -gt 0) { $powerExport = $activeExportPath }
+                else { $warnings += "Power plan export returned exit code $LASTEXITCODE; the active GUID was still recorded." }
             }
         }
-        catch { $warnings += "Power plan export failed: $($_.Exception.Message)"; $powerExport = $null }
+        catch { $warnings += "Power plan export failed: $($_.Exception.Message)" }
     }
     else { $warnings += 'The active power plan GUID could not be read.' }
     $powerState = [pscustomobject][ordered]@{ ActivePlanGuid = $activeGuid; ExportFile = if ($powerExport) { 'power\active-plan.pow' } else { $null }; CapturedAtUtc = [DateTime]::UtcNow.ToString('o') }
     Write-POJsonAtomic -Path (Join-Path $backupPath 'power\active-plan.json') -Object $powerState
+
+    $platinumExport = $null
+    if (-not [string]::IsNullOrWhiteSpace($PlatinumPlanGuid)) {
+        $parsedPlatinumGuid = [guid]::Empty
+        if (-not [guid]::TryParse($PlatinumPlanGuid, [ref]$parsedPlatinumGuid)) { throw 'The requested Platinum power-plan backup GUID is invalid.' }
+        $platinumExportPath = Join-Path $backupPath 'power\platinum-plan-before.pow'
+        try {
+            if (Get-Command Invoke-POExternalCommand -ErrorAction SilentlyContinue) {
+                $platinumExportResult = Invoke-POExternalCommand -FilePath 'powercfg.exe' -Arguments @('/export', $platinumExportPath, $parsedPlatinumGuid.ToString()) -TimeoutSeconds 30
+                if ($platinumExportResult.ExitCode -eq 0 -and -not $platinumExportResult.TimedOut -and (Test-Path -LiteralPath $platinumExportPath -PathType Leaf) -and (Get-Item -LiteralPath $platinumExportPath -Force).Length -gt 0) { $platinumExport = 'power\platinum-plan-before.pow' }
+                else { $warnings += "Platinum plan export did not verify (exit code $($platinumExportResult.ExitCode), timeout=$($platinumExportResult.TimedOut))." }
+            }
+            else {
+                & powercfg.exe /export $platinumExportPath $parsedPlatinumGuid.ToString() 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $platinumExportPath -PathType Leaf) -and (Get-Item -LiteralPath $platinumExportPath -Force).Length -gt 0) { $platinumExport = 'power\platinum-plan-before.pow' }
+                else { $warnings += "Platinum plan export returned exit code $LASTEXITCODE." }
+            }
+        }
+        catch { $warnings += "Platinum plan export failed: $($_.Exception.Message)" }
+    }
 
     $dnsSnapshot = @()
     if (Get-Command Get-NetAdapter -ErrorAction SilentlyContinue) {
@@ -1523,6 +1609,12 @@ function New-POBackup {
 
     if ($null -ne $PlatinumState) {
         Write-POJsonAtomic -Path (Join-Path $backupPath 'power\platinum-state.json') -Object $PlatinumState
+    }
+    if ($null -ne $PowerSettingsSnapshot) {
+        if ($null -eq $PowerSettingsSnapshot.PSObject.Properties['PlanGuid'] -or [string]::IsNullOrWhiteSpace([string]$PowerSettingsSnapshot.PlanGuid)) {
+            throw 'The power-settings backup snapshot has no valid plan GUID.'
+        }
+        Write-POJsonAtomic -Path (Join-Path $backupPath 'power\platinum-settings-before.json') -Object $PowerSettingsSnapshot
     }
     if ($null -ne $AudioState) {
         Write-POJsonAtomic -Path (Join-Path $backupPath 'audio\audio-before.json') -Object $AudioState
@@ -1648,44 +1740,65 @@ function Test-POBackup {
 function Get-POBackups {
     [CmdletBinding()]
     param()
+    $root = Get-POBackupRoot
+    if (-not (Test-Path -LiteralPath $root)) { return @() }
     $items = @()
-    $seenPaths = @{}
-    $comparison = Get-POPathComparison
-    foreach ($root in @(Get-POBackupSearchRoots)) {
-        if (-not (Test-Path -LiteralPath $root)) { continue }
-        try { $directories = @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction Stop) }
-        catch { throw "Backup inventory could not be read from '$root': $($_.Exception.Message)" }
-        foreach ($directory in $directories) {
-            $fullKey = [System.IO.Path]::GetFullPath($directory.FullName)
-            if ($seenPaths.ContainsKey($fullKey)) { continue }
-            $seenPaths[$fullKey] = $true
-            $items += (Get-POBackupSummary -Directory $directory)
+    try { $directories = @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction Stop | Sort-Object -Property LastWriteTime -Descending) }
+    catch { throw "Backup inventory could not be read from '$root': $($_.Exception.Message)" }
+    foreach ($directory in $directories) {
+        $validation = Test-POBackup -Path $directory.FullName
+        $manifest = $validation.Manifest
+        $items += [pscustomobject][ordered]@{
+            Id = $directory.Name
+            Path = $directory.FullName
+            CreatedAt = if ($manifest) { [string]$manifest.createdAt } else { $directory.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss') }
+            Status = $validation.Status
+            ChangeCount = if ($manifest) { @($manifest.changes).Count } else { 0 }
+            Changes = if ($manifest) { @($manifest.changes | ForEach-Object { $_.name }) -join ', ' } else { '' }
+            Issues = @($validation.Issues)
         }
     }
-    return @($items | Sort-Object -Property CreatedAt -Descending)
+    return $items
 }
 
-function Get-POBackupSummary {
+function Test-POBackupNeedsRestore {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)]$Directory)
-    $validation = Test-POBackup -Path $Directory.FullName
-    $manifest = $validation.Manifest
+    param([Parameter(Mandatory = $true)][psobject]$Manifest)
+    $sectionProperty = $Manifest.PSObject.Properties['modifiedSections']
+    $sections = @()
+    if ($null -ne $sectionProperty) {
+        $sections = @($sectionProperty.Value | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    }
+    if ($sections.Count -eq 0) {
+        return [pscustomobject][ordered]@{ NeedsRestore = $false; PendingSections = @(); RestoredSections = @() }
+    }
+
+    $restoredSet = @{}
+    $historyProperty = $Manifest.PSObject.Properties['restoreHistory']
+    if ($null -ne $historyProperty) {
+        foreach ($historyEntry in @($historyProperty.Value)) {
+            if ($null -eq $historyEntry) { continue }
+            $restoredProperty = $historyEntry.PSObject.Properties['restoredSections']
+            if ($null -eq $restoredProperty) { continue }
+            foreach ($restoredSection in @($restoredProperty.Value)) {
+                $name = [string]$restoredSection
+                if (-not [string]::IsNullOrWhiteSpace($name)) { $restoredSet[$name] = $true }
+            }
+        }
+    }
+    $restored = @($sections | Where-Object { $restoredSet.ContainsKey([string]$_) })
+    $pending = @($sections | Where-Object { -not $restoredSet.ContainsKey([string]$_) })
     return [pscustomobject][ordered]@{
-        Id = $Directory.Name
-        Path = $Directory.FullName
-        CreatedAt = if ($manifest -and $manifest.PSObject.Properties['createdAt']) { [string]$manifest.createdAt } else { $Directory.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss') }
-        Status = $validation.Status
-        ApplicationVersion = if ($manifest -and $manifest.PSObject.Properties['applicationVersion']) { [string]$manifest.applicationVersion } else { 'Unknown' }
-        ChangeCount = if ($manifest) { @($manifest.changes).Count } else { 0 }
-        Changes = if ($manifest) { @($manifest.changes | ForEach-Object { $_.name }) -join ', ' } else { '' }
-        Issues = @($validation.Issues)
+        NeedsRestore = ($pending.Count -gt 0)
+        PendingSections = $pending
+        RestoredSections = $restored
     }
 }
 
 function Add-POBackupChange {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$BackupPath,
-          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display', 'network-tcp', 'network-adapter-power')][string]$Section,
+          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display')][string]$Section,
           [Parameter(Mandatory = $true)][psobject]$Change)
     $manifestPath = Join-Path $BackupPath 'manifest.json'
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
@@ -1701,21 +1814,15 @@ function Add-POBackupChange {
 function Update-POBackupChangeStatus {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$BackupPath,
-          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display', 'network-tcp', 'network-adapter-power')][string]$Section,
+          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display')][string]$Section,
           [Parameter(Mandatory = $true)][string]$Status,
           [string]$Message = '',
-          [AllowNull()][string]$ChangeId = $null,
-          [AllowNull()][string[]]$AfterIPv4)
+          [AllowNull()][string[]]$AfterIPv4,
+          [AllowNull()][AllowEmptyCollection()][object[]]$PowerSettingWrites)
     $manifestPath = Join-Path $BackupPath 'manifest.json'
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
     $changes = @($manifest.changes)
-    if ([string]::IsNullOrWhiteSpace($ChangeId)) {
-        $matches = @($changes | Where-Object { $_.section -eq $Section } | Select-Object -Last 1)
-    }
-    else {
-        $matches = @($changes | Where-Object { $_.section -eq $Section -and $_.PSObject.Properties['id'] -and [string]$_.id -eq $ChangeId } | Select-Object -Last 1)
-        if ($matches.Count -eq 0) { throw "No $Section transaction with id '$ChangeId' is recorded in this backup." }
-    }
+    $matches = @($changes | Where-Object { $_.section -eq $Section } | Select-Object -Last 1)
     if ($matches.Count -eq 0) { throw "No $Section transaction is recorded in this backup." }
     $change = $matches[0]
     if ($change.PSObject.Properties['status']) { $change.status = $Status }
@@ -1726,56 +1833,90 @@ function Update-POBackupChangeStatus {
         if ($change.PSObject.Properties['afterIPv4']) { $change.afterIPv4 = @($AfterIPv4) }
         else { $change | Add-Member -MemberType NoteProperty -Name 'afterIPv4' -Value @($AfterIPv4) }
     }
+    if ($PSBoundParameters.ContainsKey('PowerSettingWrites')) {
+        $normalizedSettingWrites = @()
+        foreach ($settingWrite in $PowerSettingWrites) { if ($null -ne $settingWrite) { $normalizedSettingWrites += $settingWrite } }
+        if ($change.PSObject.Properties['settingWrites']) { $change.settingWrites = $normalizedSettingWrites }
+        else { $change | Add-Member -MemberType NoteProperty -Name 'settingWrites' -Value $normalizedSettingWrites }
+        if ($change.PSObject.Properties['settingWritesRecorded']) { $change.settingWritesRecorded = $true }
+        else { $change | Add-Member -MemberType NoteProperty -Name 'settingWritesRecorded' -Value $true }
+    }
     $manifest.changes = $changes
     Write-POJsonAtomic -Path $manifestPath -Object $manifest
-}
-
-function Add-POBackupFile {
-    # Writes an additional snapshot file into an existing backup directory and
-    # registers it in the manifest checksum inventory, so Test-POBackup stays
-    # valid. Used for pre-change captures that are recorded after the backup
-    # skeleton was created (for example TCP state or adapter power settings).
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][string]$BackupPath,
-        [Parameter(Mandatory = $true)][string]$RelativePath,
-        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content
-    )
-    $manifestPath = Join-Path $BackupPath 'manifest.json'
-    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Backup manifest is missing: $manifestPath" }
-    if ([string]::IsNullOrWhiteSpace($RelativePath)) { throw 'RelativePath must not be empty.' }
-    if ([System.IO.Path]::IsPathRooted($RelativePath)) { throw 'RelativePath must be a backup-relative path.' }
-    $target = [System.IO.Path]::GetFullPath((Join-Path $BackupPath $RelativePath))
-    $rootPrefix = Get-POPathRootPrefix -Path $BackupPath
-    if (-not $target.StartsWith($rootPrefix, (Get-POPathComparison))) { throw 'Backup file target is outside the backup directory.' }
-    if ($target.Equals([System.IO.Path]::GetFullPath($manifestPath), (Get-POPathComparison))) { throw 'The manifest cannot be overwritten through Add-POBackupFile.' }
-    $parent = Split-Path -Parent $target
-    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-    Set-Content -LiteralPath $target -Value $Content -Encoding UTF8
-    $file = Get-Item -LiteralPath $target -Force -ErrorAction Stop
-    $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256 -ErrorAction Stop).Hash
-    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
-    $files = @($manifest.files)
-    $entry = [pscustomobject][ordered]@{ Path = $RelativePath; Length = [long]$file.Length; SHA256 = $hash }
-    $replaced = $false
-    for ($i = 0; $i -lt $files.Count; $i++) {
-        if ($null -ne $files[$i] -and $files[$i].PSObject.Properties['Path'] -and [string]$files[$i].Path -eq $RelativePath) { $files[$i] = $entry; $replaced = $true; break }
-    }
-    if (-not $replaced) { $files += $entry }
-    $manifest.files = $files
-    Write-POJsonAtomic -Path $manifestPath -Object $manifest
-    return [pscustomobject][ordered]@{ Path = $target; RelativePath = $RelativePath; Length = [long]$file.Length; SHA256 = $hash }
 }
 
 function Set-POActivePowerPlan {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][guid]$Guid)
-    & powercfg.exe /setactive $Guid.ToString() 2>&1 | Out-Null
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) { throw "powercfg /setactive failed with exit code $exitCode." }
+    if (Get-Command Invoke-POExternalCommand -ErrorAction SilentlyContinue) {
+        $commandResult = Invoke-POExternalCommand -FilePath 'powercfg.exe' -Arguments @('/setactive', $Guid.ToString()) -TimeoutSeconds 30
+        if ($commandResult.TimedOut) { throw 'powercfg /setactive timed out after 30 seconds.' }
+        if ($commandResult.ExitCode -ne 0) { throw "powercfg /setactive failed with exit code $($commandResult.ExitCode): $(($commandResult.ErrorOutput -join ' ').Trim())" }
+    }
+    else {
+        & powercfg.exe /setactive $Guid.ToString() 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) { throw "powercfg /setactive failed with exit code $exitCode." }
+    }
     $actual = Get-POActivePowerPlanGuid
     if ($actual -ne $Guid.ToString().ToLowerInvariant()) { throw "Power-plan verification failed. Requested $Guid; Windows reports $actual." }
     return $actual
+}
+
+function Get-POPlatinumSettingRestoreSelection {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][psobject]$BeforeSnapshot,
+        [Parameter(Mandatory = $true)][psobject]$CurrentSnapshot,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SettingWrites
+    )
+    if ($null -eq $BeforeSnapshot.PSObject.Properties['Settings'] -or $null -eq $CurrentSnapshot.PSObject.Properties['Settings']) {
+        throw 'The pre-run or current Platinum settings snapshot has no setting list.'
+    }
+    $restoreKeys = @()
+    $alreadyRestored = @()
+    foreach ($write in @($SettingWrites)) {
+        if ($null -eq $write) { throw 'The Platinum setting-write history contains a null record.' }
+        foreach ($field in @('Id', 'Attempted', 'PreviousValue', 'TargetValue')) {
+            if ($null -eq $write.PSObject.Properties[$field]) { throw "A Platinum setting-write record is missing '$field'." }
+        }
+        if (-not [bool]$write.Attempted) { continue }
+        $match = [regex]::Match([string]$write.Id, '^(?<id>[a-z0-9-]+)-(?<side>ac|dc)$', 'IgnoreCase')
+        if (-not $match.Success) { throw "The attempted Platinum setting identifier '$($write.Id)' is invalid." }
+        $settingId = $match.Groups['id'].Value
+        $sideUpper = $match.Groups['side'].Value.ToUpperInvariant()
+        $valuePropertyName = if ($sideUpper -eq 'AC') { 'AcValue' } else { 'DcValue' }
+        $capturedPropertyName = if ($sideUpper -eq 'AC') { 'AcCaptured' } else { 'DcCaptured' }
+        $beforeRecord = @($BeforeSnapshot.Settings | Where-Object { [string]$_.Id -eq $settingId } | Select-Object -First 1)
+        $currentRecord = @($CurrentSnapshot.Settings | Where-Object { [string]$_.Id -eq $settingId } | Select-Object -First 1)
+        if ($beforeRecord.Count -eq 0 -or $currentRecord.Count -eq 0 -or
+            $null -eq $beforeRecord[0].PSObject.Properties[$capturedPropertyName] -or
+            $null -eq $beforeRecord[0].PSObject.Properties[$valuePropertyName] -or
+            $null -eq $currentRecord[0].PSObject.Properties[$capturedPropertyName] -or
+            $null -eq $currentRecord[0].PSObject.Properties[$valuePropertyName] -or
+            -not [bool]$beforeRecord[0].$capturedPropertyName -or
+            -not [bool]$currentRecord[0].$capturedPropertyName) {
+            throw "The attempted Platinum setting '$settingId' ($sideUpper) is not fully captured in both snapshots."
+        }
+        $beforeValue = 0; $currentValue = 0; $recordedPrevious = 0; $targetValue = 0
+        if (-not [int]::TryParse([string]$beforeRecord[0].$valuePropertyName, [ref]$beforeValue) -or
+            -not [int]::TryParse([string]$currentRecord[0].$valuePropertyName, [ref]$currentValue) -or
+            -not [int]::TryParse([string]$write.PreviousValue, [ref]$recordedPrevious) -or
+            -not [int]::TryParse([string]$write.TargetValue, [ref]$targetValue)) {
+            throw "The attempted Platinum setting '$settingId' ($sideUpper) contains a non-integer value."
+        }
+        if ($recordedPrevious -ne $beforeValue) { throw "The setting-write history for '$settingId' ($sideUpper) does not match the pre-run snapshot." }
+        if ($beforeValue -eq $targetValue) { continue }
+        if ($currentValue -eq $beforeValue) { $alreadyRestored += ($settingId + '|' + $sideUpper); continue }
+        if ($currentValue -ne $targetValue) {
+            throw "The Platinum '$settingId' ($sideUpper) value changed after optimization; refusing to overwrite the newer user value."
+        }
+        $restoreKeys += ($settingId + '|' + $sideUpper)
+    }
+    return [pscustomobject][ordered]@{
+        RestoreKeys = @($restoreKeys | Select-Object -Unique)
+        AlreadyRestored = @($alreadyRestored | Select-Object -Unique)
+    }
 }
 
 function Restore-POPowerPlan {
@@ -1793,29 +1934,76 @@ function Restore-POPowerPlan {
         $platinumStatePath = Join-Path $BackupPath 'power\platinum-state.json'
         if (-not (Test-Path -LiteralPath $platinumStatePath -PathType Leaf)) { throw 'The backup does not contain the Platinum On Steroids state file.' }
         $platinumState = Get-Content -LiteralPath $platinumStatePath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $platinumState.PSObject.Properties['OriginalActivePlanGuid']) { throw 'The Platinum plan backup does not record the original active plan GUID.' }
         $originalGuid = [string]$platinumState.OriginalActivePlanGuid
-        if ([string]::IsNullOrWhiteSpace($originalGuid)) { throw 'The Platinum plan state does not record the original active plan.' }
         $parsedOriginal = [guid]::Empty
-        if (-not [guid]::TryParse($originalGuid, [ref]$parsedOriginal)) { throw 'The Platinum plan state contains an invalid original plan GUID.' }
-        if ([string]$change[0].fromGuid -ne $parsedOriginal.ToString()) { throw 'The transaction ledger and Platinum state file disagree about the original plan.' }
+        if (-not [guid]::TryParse($originalGuid, [ref]$parsedOriginal)) { throw 'The Platinum plan state contains an invalid original active-plan GUID.' }
+        $ledgerFromGuid = [guid]::Empty
+        if (-not [guid]::TryParse([string]$change[0].fromGuid, [ref]$ledgerFromGuid) -or $ledgerFromGuid.ToString() -ne $parsedOriginal.ToString()) {
+            throw 'The transaction ledger and Platinum state disagree about the original plan.'
+        }
+        $targetText = [string]$change[0].toGuid
+        if ($platinumState.PSObject.Properties['PlatinumPlanGuid'] -and -not [string]::IsNullOrWhiteSpace([string]$platinumState.PlatinumPlanGuid)) {
+            if ([string]$platinumState.PlatinumPlanGuid -ne $targetText) { throw 'The backup power-plan GUID fields disagree.' }
+        }
+        $targetGuid = [guid]::Empty
+        if (-not [guid]::TryParse($targetText, [ref]$targetGuid)) { throw 'The transaction ledger contains an invalid Platinum plan GUID.' }
         $currentActive = Get-POActivePowerPlanGuid
         if ([string]::IsNullOrWhiteSpace($currentActive)) { throw 'The current active power plan could not be read; restore was blocked.' }
-        if ($currentActive -eq $parsedOriginal.ToString()) { return }
-        $platinumGuidText = if ($platinumState.PSObject.Properties['PlatinumPlanGuid']) { [string]$platinumState.PlatinumPlanGuid } else { [string]$change[0].toGuid }
-        if ($currentActive -ne $platinumGuidText.ToLowerInvariant() -and $currentActive -ne $platinumGuidText) {
-            throw 'The active power plan changed after Platinum Optimizer applied the Platinum plan; refusing to overwrite that newer user choice.'
+        $normalizedActive = $currentActive.ToLowerInvariant()
+        if ($normalizedActive -ne $parsedOriginal.ToString() -and $normalizedActive -ne $targetGuid.ToString()) {
+            throw 'The active power plan changed after Platinum Optimizer ran; refusing to overwrite that newer user choice.'
         }
-        $available = @(Get-POPowerPlans | Where-Object { $_.Guid -eq $parsedOriginal.ToString() })
-        if ($available.Count -eq 0 -and $state.ExportFile) {
-            $exportRelative = [string]$state.ExportFile
-            if ($exportRelative -ne 'power\active-plan.pow' -and $exportRelative -ne 'power/active-plan.pow') { throw 'The backup contains an invalid power-plan export path.' }
-            $export = Join-Path $BackupPath $exportRelative
-            if (Test-Path -LiteralPath $export -PathType Leaf) {
-                & powercfg.exe /import $export $parsedOriginal.ToString() 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { throw "Power-plan restore import failed with exit code $LASTEXITCODE." }
+
+        $existedBefore = $false
+        if ($null -ne $platinumState.PSObject.Properties['PlatinumPlanExistedBefore']) { $existedBefore = [bool]$platinumState.PlatinumPlanExistedBefore }
+        $platinumPlanPresent = @()
+        $snapshot = $null
+        $restoreSettingKeys = @()
+        if ($existedBefore) {
+            $snapshotRelative = [string]$platinumState.PowerSettingsSnapshotFile
+            if ($snapshotRelative -ne 'power\platinum-settings-before.json') { throw 'The Platinum settings snapshot path is missing or not approved.' }
+            $snapshotPath = Join-Path $BackupPath $snapshotRelative
+            if (-not (Test-Path -LiteralPath $snapshotPath -PathType Leaf)) { throw 'The pre-optimization Platinum settings snapshot is missing.' }
+            $platinumPlanPresent = @(Get-POPowerPlans | Where-Object { $_.Guid -eq $targetGuid.ToString() })
+            if ($platinumPlanPresent.Count -gt 0) {
+                if (-not (Get-Command Restore-POPlatinumPowerSettingsSnapshot -ErrorAction SilentlyContinue) -or -not (Get-Command Get-POPlatinumPowerSettingsSnapshot -ErrorAction SilentlyContinue)) { throw 'The Power module is not loaded; existing Platinum plan settings cannot be safely restored.' }
+                $snapshot = Get-Content -LiteralPath $snapshotPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+                if ($null -eq $snapshot.PSObject.Properties['SchemaVersion'] -or [int]$snapshot.SchemaVersion -ne 1 -or
+                    $null -eq $snapshot.PSObject.Properties['PlanGuid'] -or [string]$snapshot.PlanGuid -ne $targetGuid.ToString() -or
+                    $null -eq $snapshot.PSObject.Properties['Settings']) { throw 'The pre-optimization Platinum settings snapshot is invalid or belongs to another plan.' }
+                $writesRecordedProperty = $change[0].PSObject.Properties['settingWritesRecorded']
+                $writesProperty = $change[0].PSObject.Properties['settingWrites']
+                if ($null -eq $writesRecordedProperty -or -not [bool]$writesRecordedProperty.Value -or $null -eq $writesProperty) {
+                    throw 'The backup does not identify which Platinum setting sides were attempted; settings restore was blocked to avoid overwriting unrelated values.'
+                }
+                $settingWrites = @($writesProperty.Value)
+                if ($settingWrites.Count -gt 0) {
+                    $currentSnapshot = Get-POPlatinumPowerSettingsSnapshot -PlanGuid $targetGuid.ToString()
+                    if ($null -eq $currentSnapshot.PSObject.Properties['PlanGuid'] -or [string]$currentSnapshot.PlanGuid -ne $targetGuid.ToString()) { throw 'The current Platinum settings snapshot belongs to another plan; restore was blocked.' }
+                    $selection = Get-POPlatinumSettingRestoreSelection -BeforeSnapshot $snapshot -CurrentSnapshot $currentSnapshot -SettingWrites $settingWrites
+                    $restoreSettingKeys = @($selection.RestoreKeys)
+                }
             }
         }
-        [void](Set-POActivePowerPlan -Guid $parsedOriginal)
+
+        $availableOriginal = @(Get-POPowerPlans | Where-Object { $_.Guid -eq $parsedOriginal.ToString() })
+        if ($availableOriginal.Count -eq 0) {
+            $exportRelative = [string]$state.ExportFile
+            if ($exportRelative -notin @('power\active-plan.pow', 'power/active-plan.pow')) { throw 'The backup does not contain an approved export path for the original active plan.' }
+            $exportPath = Join-Path $BackupPath $exportRelative
+            if (-not (Test-Path -LiteralPath $exportPath -PathType Leaf)) { throw "The previous active plan $($parsedOriginal.ToString()) is missing and its verified export is unavailable." }
+            $import = Invoke-POExternalCommand -FilePath 'powercfg.exe' -Arguments @('/import', $exportPath, $parsedOriginal.ToString()) -TimeoutSeconds 30
+            if ($import.TimedOut -or $import.ExitCode -ne 0) { throw "Re-importing the previous active plan failed (exit code $($import.ExitCode), timeout=$($import.TimedOut))." }
+            $availableOriginal = @(Get-POPowerPlans | Where-Object { $_.Guid -eq $parsedOriginal.ToString() })
+            if ($availableOriginal.Count -eq 0) { throw 'The imported previous plan was not found in powercfg /list.' }
+        }
+        if ($normalizedActive -ne $parsedOriginal.ToString()) { [void](Set-POActivePowerPlan -Guid $parsedOriginal) }
+
+        if ($existedBefore -and $platinumPlanPresent.Count -gt 0 -and $restoreSettingKeys.Count -gt 0) {
+            $restoreResult = Restore-POPlatinumPowerSettingsSnapshot -PlanGuid $targetGuid.ToString() -Snapshot $snapshot -SettingKeys @($restoreSettingKeys | Select-Object -Unique)
+            if (-not $restoreResult.Verified) { throw ('Restoring changed Platinum settings failed: ' + (@($restoreResult.Failed) -join '; ')) }
+        }
         return
     }
     if ($change[0].id -ne 'power-plan') { throw 'No supported power-plan change was recorded in this backup.' }
@@ -1834,8 +2022,14 @@ function Restore-POPowerPlan {
         if ($exportRelative -ne 'power\active-plan.pow' -and $exportRelative -ne 'power/active-plan.pow') { throw 'The backup contains an invalid power-plan export path.' }
         $export = Join-Path $BackupPath $exportRelative
         if (Test-Path -LiteralPath $export -PathType Leaf) {
-            & powercfg.exe /import $export $guid 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "Power-plan restore import failed with exit code $LASTEXITCODE." }
+            if (Get-Command Invoke-POExternalCommand -ErrorAction SilentlyContinue) {
+                $importResult = Invoke-POExternalCommand -FilePath 'powercfg.exe' -Arguments @('/import', $export, $guid) -TimeoutSeconds 30
+                if ($importResult.TimedOut -or $importResult.ExitCode -ne 0) { throw "Power-plan restore import failed (exit code $($importResult.ExitCode), timeout=$($importResult.TimedOut))." }
+            }
+            else {
+                & powercfg.exe /import $export $guid 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "Power-plan restore import failed with exit code $LASTEXITCODE." }
+            }
         }
     }
     [void](Set-POActivePowerPlan -Guid ([guid]$guid))
@@ -1906,11 +2100,12 @@ function Restore-POBackup {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param([Parameter(Mandatory = $true)][string]$BackupPath)
     $fullPath = [System.IO.Path]::GetFullPath($BackupPath)
-    if (-not (Test-POPathInsideBackupRoots -Path $fullPath)) { throw 'Restore is limited to backups inside a Platinum Optimizer backup directory.' }
+    $root = Get-POPathRootPrefix -Path (Get-POBackupRoot)
+    if (-not $fullPath.StartsWith($root, (Get-POPathComparison))) { throw 'Restore is limited to backups inside the Platinum Optimizer backup directory.' }
     $validation = Test-POBackup -Path $fullPath
     if (-not $validation.Valid) { throw ('Backup validation failed: ' + (@($validation.Issues) -join '; ')) }
     $manifest = $validation.Manifest
-    $allowedSections = @('power', 'network', 'registry', 'audio', 'display', 'network-tcp', 'network-adapter-power')
+    $allowedSections = @('power', 'network', 'registry', 'audio', 'display')
     $sections = @($manifest.modifiedSections | Select-Object -Unique)
     $unknownSections = @($sections | Where-Object { $_ -notin $allowedSections })
     if ($unknownSections.Count -gt 0) { throw ('Backup contains unsupported restore sections: ' + ($unknownSections -join ', ')) }
@@ -1923,13 +2118,19 @@ function Restore-POBackup {
     foreach ($section in $changeSections) {
         if ($section -notin $sections) { throw "Change-ledger section '$section' is not listed in modifiedSections." }
     }
-    if ($sections.Count -eq 0) { return [pscustomobject]@{ Status = 'NO_CHANGES'; Message = 'This backup has no optimizer changes to restore.'; Restored = @() } }
-    if (-not $PSCmdlet.ShouldProcess($manifest.id, 'Restore recorded Platinum Optimizer changes')) {
-        return [pscustomobject]@{ Status = 'SIMULATED'; Message = 'Restore was not executed.'; Restored = @() }
+    $restoreSelection = Test-POBackupNeedsRestore -Manifest $manifest
+    $restoredBefore = @($restoreSelection.RestoredSections)
+    $sections = @($restoreSelection.PendingSections)
+    if ($sections.Count -eq 0) {
+        $message = if (@($manifest.modifiedSections).Count -eq 0) { 'This backup has no optimizer changes to restore.' } else { 'All recorded optimizer changes in this backup were already restored.' }
+        return [pscustomobject]@{ Status = 'NO_CHANGES'; Message = $message; Restored = @(); AlreadyRestored = $restoredBefore; Failures = @(); UnverifiedSections = @() }
     }
-    $systemSections = @($sections | Where-Object { $_ -in @('power', 'network', 'registry', 'network-tcp', 'network-adapter-power') })
+    if (-not $PSCmdlet.ShouldProcess($manifest.id, 'Restore pending recorded Platinum Optimizer changes')) {
+        return [pscustomobject]@{ Status = 'SIMULATED'; Message = 'Restore was not executed.'; Restored = @(); Failures = @(); UnverifiedSections = @() }
+    }
+    $systemSections = @($sections | Where-Object { $_ -in @('power', 'network', 'registry') })
     if ($systemSections.Count -gt 0 -and -not (Test-POIsAdministrator)) { throw 'Restoring system settings requires an elevated Administrator session.' }
-    $restored = @(); $failures = @()
+    $restored = @(); $failures = @(); $unverifiedSections = @()
     foreach ($section in $sections) {
         try {
             switch ($section) {
@@ -1944,14 +2145,6 @@ function Restore-POBackup {
                     if (-not (Get-Command Restore-PODisplaySection -ErrorAction SilentlyContinue)) { throw 'The Display module is not loaded; the display section cannot be restored in this session.' }
                     Restore-PODisplaySection -BackupPath $fullPath -Manifest $manifest
                 }
-                'network-tcp' {
-                    if (-not (Get-Command Restore-PONetworkTcpSection -ErrorAction SilentlyContinue)) { throw 'The Network module is not loaded; the TCP section cannot be restored in this session.' }
-                    Restore-PONetworkTcpSection -BackupPath $fullPath -Manifest $manifest
-                }
-                'network-adapter-power' {
-                    if (-not (Get-Command Restore-PONetworkAdapterPowerSection -ErrorAction SilentlyContinue)) { throw 'The Network module is not loaded; the adapter-power section cannot be restored in this session.' }
-                    Restore-PONetworkAdapterPowerSection -BackupPath $fullPath -Manifest $manifest
-                }
                 default { throw "No restore handler exists for changed section '$section'; no further sections were attempted." }
             }
             $restored += $section
@@ -1959,6 +2152,7 @@ function Restore-POBackup {
         }
         catch {
             $failures += "${section}: $($_.Exception.Message)"
+            $unverifiedSections += [string]$section
             Write-POLog -Level 'CRITICAL' -Category 'Restore' -Status 'FAILED' -Message $failures[-1]
             break
         }
@@ -1967,8 +2161,8 @@ function Restore-POBackup {
     $history += [pscustomobject]@{ timestampUtc = [DateTime]::UtcNow.ToString('o'); restoredSections = $restored; failures = $failures }
     $manifest.restoreHistory = $history
     Write-POJsonAtomic -Path (Join-Path $fullPath 'manifest.json') -Object $manifest
-    if ($failures.Count -gt 0) { return [pscustomobject]@{ Status = 'PARTIAL_FAILURE'; Message = 'Restore stopped after a failed section.'; Restored = $restored; Failures = $failures } }
-    return [pscustomobject]@{ Status = 'RESTORED'; Message = 'Recorded changes were restored and verified.'; Restored = $restored; Failures = @() }
+    if ($failures.Count -gt 0) { return [pscustomobject]@{ Status = 'PARTIAL_FAILURE'; Message = 'Restore stopped after a failed section; that section may have been partially applied.'; Restored = $restored; Failures = $failures; UnverifiedSections = $unverifiedSections } }
+    return [pscustomobject]@{ Status = 'RESTORED'; Message = 'Recorded changes were restored and verified.'; Restored = $restored; Failures = @(); UnverifiedSections = @() }
 }
 
 function Invoke-POProfilePlan {
@@ -2318,7 +2512,8 @@ function Export-POBackup {
     param([Parameter(Mandatory = $true)][string]$BackupPath,
           [Parameter(Mandatory = $true)][string]$DestinationPath)
     $backupFull = [System.IO.Path]::GetFullPath($BackupPath)
-    if (-not (Test-POPathInsideBackupRoots -Path $backupFull)) { throw 'Export is limited to backups inside a Platinum Optimizer backup directory.' }
+    $backupRoot = Get-POPathRootPrefix -Path (Get-POBackupRoot)
+    if (-not $backupFull.StartsWith($backupRoot, (Get-POPathComparison))) { throw 'Export is limited to backups inside the Platinum Optimizer backup directory.' }
     $validation = Test-POBackup -Path $backupFull
     if (-not $validation.Valid) { throw ('Backup validation failed: ' + (@($validation.Issues) -join '; ')) }
     $destination = [System.IO.Path]::GetFullPath($DestinationPath)
@@ -2339,7 +2534,8 @@ function Remove-POBackup {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param([Parameter(Mandatory = $true)][string]$BackupPath)
     $fullPath = [System.IO.Path]::GetFullPath($BackupPath)
-    if (-not (Test-POPathInsideBackupRoots -Path $fullPath)) { throw 'Delete is limited to backups inside a Platinum Optimizer backup directory.' }
+    $root = Get-POPathRootPrefix -Path (Get-POBackupRoot)
+    if (-not $fullPath.StartsWith($root, (Get-POPathComparison))) { throw 'Delete is limited to backups inside the Platinum Optimizer backup directory.' }
     if (-not (Test-Path -LiteralPath $fullPath -PathType Container)) { throw 'Backup directory does not exist.' }
     $backupItem = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
     if (($backupItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Refusing to delete a backup directory that is a reparse point.' }
@@ -2350,14 +2546,13 @@ function Remove-POBackup {
 
 Export-ModuleMember -Function @(
     'Get-POStateRoot', 'Get-POJsonFile', 'Get-POProfileCatalog', 'Get-POTweakCatalog', 'Get-POGameCatalog', 'Get-POServiceCatalog',
-    'Test-POIsWindows', 'Test-POIsAdministrator', 'Get-POSystemSnapshot', 'Get-POStatusSnapshot', 'Get-POPowerPlans',
+    'Test-POIsWindows', 'Test-POIsAdministrator', 'Invoke-POExternalCommand', 'Get-POSystemSnapshot', 'Get-POStatusSnapshot', 'Get-POPowerPlans',
     'Get-PORegValueState', 'Set-PORegValueState', 'Test-POIPv4DnsAddresses',
     'Write-POJsonAtomic', 'Add-POBackupChange', 'Update-POBackupChangeStatus', 'Set-POActivePowerPlan',
     'Get-POActivePowerPlanGuid', 'Get-POBuiltinPlanGuid', 'Get-POProfiles', 'Get-POTweakCompatibility', 'New-POProfilePlan',
     'Get-PONetworkAdapters', 'Get-POCurrentAdapterDns', 'Test-POAdapterDnsEligibility', 'Invoke-PONetworkPingTest', 'Get-POServiceAudit', 'Get-POBcdAudit',
     'Get-POStartupAudit', 'Get-PODriverInventory', 'Get-POScheduledTaskAudit', 'Get-POAppxInventory', 'Get-POInstalledGames', 'Add-POCustomGame', 'Get-POBenchmarkSnapshot',
-    'Save-POBenchmarkSnapshot', 'Compare-POBenchmarkSnapshots', 'New-POBackup', 'Test-POBackup', 'Get-POBackups',
-    'Get-POBackupRoot', 'Get-POBackupSearchRoots', 'Test-POPathInsideBackupRoots', 'Add-POBackupFile', 'Get-POBackupSummary',
+    'Save-POBenchmarkSnapshot', 'Compare-POBenchmarkSnapshots', 'New-POBackup', 'Test-POBackup', 'Test-POBackupNeedsRestore', 'Get-POBackups',
     'Restore-POBackup', 'Invoke-POProfilePlan', 'Set-PODnsProvider', 'Get-POUserTempPreview', 'Clear-POUserTemp',
     'Get-POResourceSample', 'Open-POWindowsSettings', 'Export-POBackup', 'Remove-POBackup', 'Write-POLog'
 )
