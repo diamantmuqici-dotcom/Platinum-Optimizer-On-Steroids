@@ -29,6 +29,20 @@ The automatic pipeline uses documented Windows inventory and power-management in
 13. **Windows Color Management** — Windows Color System documentation describes ICC profile management. The optimizer reads associations where available and does not install or force a color profile.
     <https://learn.microsoft.com/en-us/windows/win32/wcs/windows-color-system>
 
+## Additional Microsoft references (current automatic behavior)
+
+17. **TCP global state** — Microsoft PowerShell *NetTCPIP* module: `Get-NetTCPSetting -SettingStore Active` and `netsh int tcp show global` expose Windows-reported TCP policy. The current automatic pipeline records the supported read-only `netsh` snapshot and does not alter autotuning, ECN, timestamps, congestion control, RSS/RSC, or offloads.
+    <https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpsetting> ·
+    <https://learn.microsoft.com/en-us/windows-server/networking/technologies/netsh/netsh-interface-tcp>
+18. **Adapter power management** — Microsoft PowerShell *NetAdapter* documents `Get-NetAdapterPowerManagement` / `Set-NetAdapterPowerManagement` for adapter power policy. The current automatic path inventories adapters only; it does not call the setter or change connectivity.
+    <https://learn.microsoft.com/en-us/powershell/module/netadapter/set-netadapterpowermanagement>
+19. **System Restore point** — Microsoft PowerShell exposes `Checkpoint-Computer` and `Get-ComputerRestorePoint` when System Protection is available. The current workflow attempts a restore point only after its verified application backup and required power exports; it never enables System Protection. The local configuration backup remains the primary recovery path.
+    <https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/checkpoint-computer>
+20. **Game capture / Game DVR settings** — Microsoft Support documents background recording and the Settings > Gaming > Captures surface. The current automatic path reads relevant gaming values and leaves Game Mode, Game Bar, and capture preferences unchanged.
+    <https://support.microsoft.com/en-us/windows/record-game-clips-on-your-pc-with-game-bar-2ed42714-8bdd-34f3-4b6d-cab7d4d9bce7>
+21. **Hardware-accelerated GPU scheduling** — Microsoft documents HAGS in Settings > System > Display > Graphics. Support depends on GPU and driver; enabling requires a reboot. The current path reports the `HwSchMode` state where available and leaves it unchanged.
+    <https://support.microsoft.com/en-us/windows/how-to-enable-hardware-accelerated-gpu-scheduling-in-windows-11-a2db51b8-2be5-4d51-8d08-8f5fbd1a4b6d>
+
 ## Interpretation policy
 
 - A documented Windows API is an interface contract, not evidence that a setting improves a particular game.
