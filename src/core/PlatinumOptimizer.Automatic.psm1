@@ -4,7 +4,7 @@
 # read-only; the automatic writer is the verified Platinum power-plan path.
 Set-StrictMode -Version 2.0
 
-$script:POAutomaticModuleVersion = '2.0.1'
+$script:POAutomaticModuleVersion = '2.0.2'
 
 function Get-POAutomaticPropertyValue {
     [CmdletBinding()]
@@ -484,6 +484,29 @@ function Write-POAutomaticSummary {
     Write-Host ("Skipped:                 {0}" -f $Context.Skipped.Count)
     Write-Host ("Failed:                  {0}" -f $Context.Failed.Count)
     Write-Host ("Could not be verified:   {0}" -f $Context.Unverified.Count)
+    $detailGroups = @(
+        [pscustomobject]@{ Label = 'APPLIED / VERIFIED'; Items = @($Context.Applied); Color = 'Green' }
+        [pscustomobject]@{ Label = 'RESTORED / VERIFIED'; Items = @($Context.Restored); Color = 'Green' }
+        [pscustomobject]@{ Label = 'ALREADY AT TARGET'; Items = @($Context.AlreadyOptimized); Color = 'DarkGray' }
+        [pscustomobject]@{ Label = 'SKIPPED'; Items = @($Context.Skipped); Color = 'Yellow' }
+        [pscustomobject]@{ Label = 'FAILED'; Items = @($Context.Failed); Color = 'Red' }
+        [pscustomobject]@{ Label = 'UNVERIFIED'; Items = @($Context.Unverified); Color = 'Yellow' }
+    )
+    foreach ($group in $detailGroups) {
+        if ($group.Items.Count -eq 0) { continue }
+        Write-Host ''
+        Write-Host ("{0} details:" -f $group.Label) -ForegroundColor $group.Color
+        foreach ($item in @($group.Items)) {
+            if ($group.Label -in @('SKIPPED', 'FAILED', 'UNVERIFIED')) {
+                Write-Host ("  - {0}: {1}" -f $item.name, $item.reason) -ForegroundColor $group.Color
+            }
+            else {
+                $beforeText = if ($null -ne $item.previousValue) { [string]$item.previousValue } else { '(none)' }
+                $targetText = if ($null -ne $item.targetValue) { [string]$item.targetValue } else { '(none)' }
+                Write-Host ("  - {0}: {1} -> {2}" -f $item.name, $beforeText, $targetText) -ForegroundColor $group.Color
+            }
+        }
+    }
     $backup = Get-POAutomaticPropertyValue -InputObject $Context.Report -Name 'backup'
     $backupPath = Get-POAutomaticPropertyValue -InputObject $backup -Name 'path'
     if ($backupPath) { Write-Host ("Backup: {0}" -f $backupPath) }

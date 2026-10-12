@@ -54,6 +54,13 @@ try {
         if (-not (Test-Path -LiteralPath $modulePath -PathType Leaf)) {
             throw "Required module was not found: $modulePath"
         }
+        # No -DisableNameChecking: v2.0.2 added it to silence the
+        # "unapproved verbs" warning from PlatinumOptimizer.Display. The cause
+        # was exported function Compute-POGammaRamp; "Compute" is not an
+        # approved verb. It is now New-POGammaRamp, so every exported name
+        # uses an approved verb and the warning no longer occurs. Suppressing
+        # it here would also hide genuine naming problems in future modules,
+        # and tools/ps_contract_check.py fails the build if one is introduced.
         Import-Module -Name $modulePath -Global -Force -ErrorAction Stop
     }
 }
