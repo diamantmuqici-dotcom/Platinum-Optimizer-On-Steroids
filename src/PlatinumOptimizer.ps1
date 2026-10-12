@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
-$script:POApplicationVersion = '2.0.1'
+$script:POApplicationVersion = '2.0.2'
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 
 $legacyModeSwitches = @()
@@ -45,7 +45,7 @@ try {
         if (-not (Test-Path -LiteralPath $modulePath -PathType Leaf)) {
             throw "Required module was not found: $modulePath"
         }
-        Import-Module -Name $modulePath -Global -Force -ErrorAction Stop
+        Import-Module -Name $modulePath -Global -Force -DisableNameChecking -ErrorAction Stop
     }
 }
 catch {
@@ -68,7 +68,7 @@ function Write-POConsoleBanner {
     Write-Host '============================================================' -ForegroundColor DarkCyan
     Write-Host '       PLATINUM OPTIMIZER ON STEROIDS' -ForegroundColor Cyan
     Write-Host '              AUTOMATIC MODE' -ForegroundColor Cyan
-    Write-Host '                    VERSION 2.0.1' -ForegroundColor Cyan
+    Write-Host '                    VERSION 2.0.2' -ForegroundColor Cyan
     Write-Host '============================================================' -ForegroundColor DarkCyan
     Write-Host ''
 }

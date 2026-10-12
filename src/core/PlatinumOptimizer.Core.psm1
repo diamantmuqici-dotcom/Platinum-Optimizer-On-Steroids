@@ -69,6 +69,11 @@ function Invoke-POExternalCommand {
         if ($value.Contains('"')) { throw 'External command arguments may not contain a double quote.' }
         [void]$quotedArguments.Add(('"{0}"' -f $value))
     }
+    $tracePowerCfg = [string]::Equals([System.IO.Path]::GetFileName($FilePath), 'powercfg.exe', [System.StringComparison]::OrdinalIgnoreCase)
+    if ($tracePowerCfg) {
+        $displayArguments = @($Arguments | ForEach-Object { '"{0}"' -f [string]$_ })
+        Write-Host ("[TRACE {0}] > powercfg.exe {1}" -f [DateTime]::Now.ToString('HH:mm:ss.fff'), ($displayArguments -join ' ')) -ForegroundColor DarkCyan
+    }
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $FilePath
     $startInfo.Arguments = $quotedArguments -join ' '
@@ -106,6 +111,21 @@ function Invoke-POExternalCommand {
     }
     $outputLines = @($stdoutText -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $errorLines = @($stderrText -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($tracePowerCfg) {
+        $traceState = if ($timedOut) { 'TIMEOUT' } elseif ($exitCode -eq 0) { 'OK' } else { 'FAIL' }
+        $traceColor = if ($timedOut) { 'Yellow' } elseif ($exitCode -eq 0) { 'Green' } else { 'Red' }
+        Write-Host ("[TRACE {0}] < {1}; exit={2}; {3} ms" -f [DateTime]::Now.ToString('HH:mm:ss.fff'), $traceState, $exitCode, $timer.ElapsedMilliseconds) -ForegroundColor $traceColor
+        $traceOutput = @()
+        if ($timedOut -or $exitCode -ne 0) { $traceOutput = @($outputLines) + @($errorLines) }
+        elseif ($Arguments.Count -gt 0 -and [string]$Arguments[0] -notin @('/qh', '/query')) { $traceOutput = @($outputLines) }
+        $visibleOutputCount = [math]::Min(6, $traceOutput.Count)
+        for ($outputIndex = 0; $outputIndex -lt $visibleOutputCount; $outputIndex++) {
+            Write-Host ("           {0}" -f [string]$traceOutput[$outputIndex]) -ForegroundColor Gray
+        }
+        if ($traceOutput.Count -gt $visibleOutputCount) {
+            Write-Host ("           ... {0} additional output lines omitted from console; power settings are reported by the read-back verifier." -f ($traceOutput.Count - $visibleOutputCount)) -ForegroundColor DarkGray
+        }
+    }
     return [pscustomobject][ordered]@{
         FilePath = $FilePath
         Arguments = @($Arguments)
@@ -1637,7 +1657,7 @@ function New-POBackup {
         id = Split-Path -Leaf $backupPath
         createdAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
         createdAtUtc = [DateTime]::UtcNow.ToString('o')
-        applicationVersion = '2.0.1'
+        applicationVersion = '2.0.2'
         status = 'VALID'
         modifiedSections = @()
         changes = @()
