@@ -1,45 +1,38 @@
 # Technical references
 
-These sources justify the limited supported integrations used by Platinum Optimizer. They do **not** prove a universal FPS or latency improvement; the application measures locally and leaves performance conclusions to observed results.
+The automatic pipeline uses documented Windows inventory and power-management interfaces. The references below support the operations used; they do **not** prove a universal FPS or latency improvement.
 
-1. **Power plans** — Microsoft, *Powercfg command-line options*: list/query/set the active plan and export/import a scheme for rollback.
+1. **Powercfg command-line options** — Microsoft documents listing/querying schemes, duplicating and renaming plans, setting AC/DC indexes, reading hidden settings with `/qh`, exporting/importing, activating, and deleting a scheme. The optimizer checks command exit status and verifies the active GUID/settings after a write.
    <https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/powercfg-command-line-options>
-2. **DNS** — Microsoft PowerShell, *Set-DnsClientServerAddress*: configure DNS on an interface; `-ResetServerAddresses` restores default/DHCP-provided servers. The UI restricts this to one connected physical adapter only after DHCP and the absence of a per-interface static IPv4 DNS override are both confirmed; unknown state is blocked.
-   <https://learn.microsoft.com/en-us/powershell/module/dnsclient/set-dnsclientserveraddress?view=windowsserver2025-ps>
-3. **DNS policy guard** — Microsoft Policy CSP, *ADMX_DnsClient*: documents the machine `DNS_NameServer` policy, its Windows 10/11 applicability, and that it supersedes per-interface/DHCP DNS. The application checks the documented policy location read-only and blocks changes when configured.
-   <https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-dnsclient>
-4. **DNS mode guard** — Archived Microsoft TechNet, *Automating TCP/IP Networking on Clients: Part 5: Scripting DNS on Clients*: describes `NameServer` and `DhcpNameServer` under the per-interface TCP/IP registry key and their use in distinguishing static from DHCP DNS configuration. The application reads the per-interface value plus the machine DNS Client policy value; if either read fails, or an override/policy is present, it does not change DNS.
-   <https://learn.microsoft.com/en-us/previous-versions/tn-archive/ee692588(v=technet.10)>
-5. **CPU inventory** — Microsoft Win32 apps, *Win32_Processor* class: WMI properties include name, manufacturer, architecture, core/thread counts, current/max clock, cache sizes, virtualization firmware state, and processor identifiers.
+2. **Processor power settings** — Microsoft power configuration documentation describes the processor power subgroup `54533251-82be-4824-96c1-47b60b740d00`, minimum processor state `893dee8e-2bef-41e0-89c6-b55d0929964c`, maximum processor state `bc5038f7-23e0-4960-96da-33abaf5935ec`, and system cooling policy `94d3a615-a899-4ac5-ae2b-e4d8f634367f`. The automatic pipeline only writes its bounded preset values when Windows exposes and verifies the setting.
+   <https://learn.microsoft.com/en-us/windows-hardware/customize/power/unattend/microsoft-windows-powersettings>
+3. **Core parking policy settings** — Microsoft documents the Windows power setting identifiers for core parking. Platinum Optimizer reads those values when they are exposed but does not universally disable parking or alter core topology.
+   <https://learn.microsoft.com/en-us/windows/client-management/advanced-configuration-options-for-core-parking>
+4. **Processor inventory** — `Win32_Processor` exposes Windows-reported model, vendor, architecture, logical/physical count, clock/cache, and virtualization metadata. Firmware/provider data may be incomplete; the optimizer preserves unknowns.
    <https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-processor>
-6. **Memory-module inventory** — Microsoft Win32 apps, *Win32_PhysicalMemory* class: capacity, configured speed, SMBIOS memory type, manufacturer, and module locator are available where firmware reports them. Channel topology is not inferred from DIMM count.
+5. **Memory inventory** — `Win32_PhysicalMemory` exposes capacity, configured speed, memory-type code, manufacturer, and slot locator when firmware reports them. DIMM count is not treated as memory-channel topology.
    <https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-physicalmemory>
-7. **Video/storage/device inventory** — Microsoft Win32 apps, *Computer System Hardware Classes*: documents WMI/CIM inventory families including video controllers, desktop monitors, and disk drives. Vendor-specific adapter telemetry, per-monitor HDR, accurate VRAM, and temperatures are not assumed to be available from these generic classes.
+6. **Computer system hardware classes** — Microsoft documents Windows CIM/WMI inventory for video controllers, storage, and related device classes. Generic inventory does not guarantee accurate VRAM, temperature, HDR, or per-display mode data.
    <https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/computer-system-hardware-classes>
-8. **Game Mode** — Microsoft Support, *Use Game Mode while gaming on your Windows device*: describes the Windows Settings control and notes that frame-rate stability depends on the game and system.
-   <https://support.microsoft.com/en-us/help/4028293/windows-using-game-mode-on-your-pc>
-9. **Graphics preferences** — Microsoft Support, *Optimizations for windowed games in Windows 11*: documents Windows Graphics Settings and per-app graphics preference controls. The app opens this UI rather than forcing a registry or driver value.
-   <https://support.microsoft.com/en-us/windows/hardware/display-graphics/optimizations-for-windowed-games-in-windows-11>
-
-10. **Custom power plan lifecycle** — Microsoft, *Powercfg command-line options*: `/duplicatescheme`, `/setname`, `/setacvalueindex`, `/setdcvalueindex`, `/qh`, `/export`, `/import`, `/setactive`, and `/delete` are the supported scheme-management surface used by the Platinum On Steroids plan. Exit codes and re-reads gate every step.
-    <https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/powercfg-command-line-options>
-11. **Processor power settings** — Microsoft WDK, *Policy Settings* (Processor Power Management): documents the subgroup `54533251-82be-4824-96c1-47b60b740d00` and settings used here: minimum processor state `893dee8e-2bef-41e0-89c6-b55d0929964c`, maximum processor state `bc5038f7-23e0-4960-96da-33abaf5935ec`, system cooling policy `94d3a615-a899-4ac5-ae2b-e4d8f634367f`, and processor performance boost policy/mode `be337238-0d82-4146-a960-4f3749d470c7`. PCI Express ASPM `ee12f906-d277-404b-b6da-e5fa1a576df5`, USB selective suspend `48e6b7a6-50f5-4782-a5d4-53bb8f07e226`, sleep-after `29f6c1db-86da-48c5-9fdb-f2b67b1f44da`, and display-off `3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e` are likewise documented settings.
-    <https://learn.microsoft.com/en-us/windows-hardware/customize/power/unattend/microsoft-windows-powersettings>
-12. **Core parking settings** — Microsoft Windows configuration documentation for core parking policy settings (CPMAXCORES `ea062031-0e34-4ff1-9b6d-eb1059334028` AC / `ea062031-0e34-4ff1-9b6d-eb1059334029` DC, CPMINCORES `0cc5b647-c1df-4637-891a-dec35c318583` AC / `0cc5b647-c1df-4637-891a-dec35c318584` DC, utility distribution `4bdaf4e9-d103-46d7-a5f0-6280121616ef`, concurrency threshold `2430ab6f-a520-44a2-9601-f7f23b5134b1`). These settings are applied only when the platform exposes them.
-    <https://learn.microsoft.com/en-us/windows/client-management/advanced-configuration-options-for-core-parking> (see also the per-setting pages under the same documentation family)
-13. **Audio communications behavior** — the Sound control panel Communications tab stores its choice in `HKCU\Software\Microsoft\Multimedia\Audio\UserDuckingPreference` (0 mute all, 1 reduce 80% default, 2 reduce 50%, 3 do nothing). This is the only audio value the application writes; it is captured, verified, and restorable. Endpoint formats, enhancements, exclusive mode, and spatial audio remain under their supported Windows UI because no documented write interface exists.
-    <https://support.microsoft.com/en-us/windows/how-to-adjust-volume-and-sound-settings-in-windows> (see Sound settings / Sound Control Panel)
-14. **Display configuration and gamma** — Microsoft Win32 documentation: `EnumDisplayDevices`, `EnumDisplaySettings`, `ChangeDisplaySettingsEx` (with `CDS_TEST`), `GetDeviceGammaRamp`/`SetDeviceGammaRamp` (gdi32), and `CreateDC`/`DeleteDC` are the documented surfaces used for display inventory, refresh-rate changes, and bounded gamma profiles. The gamma design applies an absolute, channel-identical curve so repeated application cannot accumulate and no tint can be introduced.
+7. **Network adapters** — Microsoft documents the `Get-NetAdapter` inventory cmdlet. The optimizer reads adapter status/link metadata and TCP global state; it does not set DNS, congestion control, ECN, autotuning, offloads, RSS/RSC, duplex, or adapter power policy in automatic mode.
+   <https://learn.microsoft.com/en-us/powershell/module/netadapter/get-netadapter>
+8. **TCP global settings** — `netsh interface tcp show global` is a Windows read-only display command. The optimizer captures its output as the operating system reports it and does not import third-party TCP recipes.
+   <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/netsh-interface>
+9. **System Restore cmdlets** — Windows PowerShell exposes `Checkpoint-Computer` and `Get-ComputerRestorePoint` for restore-point creation and verification when System Protection is available. The optimizer does not enable System Protection and reports restore-point failure without substituting it for its explicit local backup.
+   <https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/checkpoint-computer>
+10. **Windows Game Mode** — Microsoft describes Game Mode as a user-configured Windows feature whose results depend on the game/system. The application observes existing gaming-related values but does not change user capture/Game Bar preferences or write unsupported registry policies.
+    <https://support.microsoft.com/en-us/help/4028293/windows-using-game-mode-on-your-pc>
+11. **Windows graphics preferences** — Microsoft documents per-application graphics preferences and Windows display/game settings. The application detects display modes when available but does not force HAGS, resolution, refresh rate, gamma, ICC profiles, or vendor saturation settings during automatic optimization.
+    <https://support.microsoft.com/en-us/windows/hardware/display-graphics/optimizations-for-windowed-games-in-windows-11>
+12. **Display configuration APIs** — Microsoft documents `EnumDisplayDevices`, `EnumDisplaySettings`, `ChangeDisplaySettingsEx`, and gamma-ramp APIs. The retained display module uses these for diagnostics and its explicitly reversible legacy functions; automatic mode remains read-only.
     <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-changedisplaysettingsexa>
-15. **Monitor configuration (DDC/CI)** — Microsoft Win32 documentation for the high-level monitor configuration functions (`GetPhysicalMonitorsFromHMONITOR`, `GetCapabilitiesStringLength`, `DestroyPhysicalMonitor`). Platinum Optimizer uses these read-only to probe DDC/CI capability and never writes a VCP feature; brightness/contrast hardware controls remain the monitor OSD.
-    <https://learn.microsoft.com/en-us/windows/win32/monitor/high-level-monitor-configuration>
-16. **Windows Color Management** — ICC profile associations are read from the documented Windows Color Management association location and surfaced with `colorcpl.exe` as the supported management UI; no profile is installed or forced.
+13. **Windows Color Management** — Windows Color System documentation describes ICC profile management. The optimizer reads associations where available and does not install or force a color profile.
     <https://learn.microsoft.com/en-us/windows/win32/wcs/windows-color-system>
 
 ## Interpretation policy
 
-- A Microsoft WMI property is an inventory surface, not a guarantee that every OEM populates it accurately.
-- `powercfg` makes a plan selectable; it does not establish that the plan improves a particular game's FPS or frame-time distribution. The prior active GUID and, where Windows permits, a `.pow` export are recorded.
-- Static DNS servers replace DHCP-provided DNS on that adapter until reset; resolver choice can change lookup behavior, but it does not generally change the game's routing or server path.
-- A brief CPU or DPC-time counter sample is not an in-game benchmark or a DPC/ISR latency measurement. The report compares observations and never converts unavailable metrics to zero.
-- Registry keys without a supported Windows/vendor contract are not promoted from forum recipes into automatic settings. The V9.3 audit CSV marks their defaults and effects unknown.
+- A documented Windows API is an interface contract, not evidence that a setting improves a particular game.
+- Copying a power scheme makes the plan selectable; it does not establish that the plan improves FPS or frame pacing.
+- DNS resolver choice can affect name lookup behavior but does not determine the route to a game server. Ping also depends on ISP routing, distance, congestion, and the remote server.
+- A brief CPU/memory/disk sample is not an in-game benchmark. DPC-time percentage is not DPC/ISR latency.
+- Unmeasured or undocumented settings are left read-only rather than promoted from forum recipes.

@@ -57,8 +57,15 @@ function Set-POPlatinumState {
 function Invoke-POPowercfg {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
-    $output = @(& powercfg.exe @Arguments 2>&1)
-    return [pscustomobject][ordered]@{ ExitCode = $LASTEXITCODE; Output = @($output | ForEach-Object { [string]$_ }) }
+    $result = Invoke-POExternalCommand -FilePath 'powercfg.exe' -Arguments $Arguments -TimeoutSeconds 30
+    $combined = @($result.Output) + @($result.ErrorOutput)
+    return [pscustomobject][ordered]@{
+        ExitCode = [int]$result.ExitCode
+        TimedOut = [bool]$result.TimedOut
+        DurationMilliseconds = [long]$result.DurationMilliseconds
+        Output = @($combined | ForEach-Object { [string]$_ })
+        ErrorOutput = @($result.ErrorOutput)
+    }
 }
 
 function ConvertFrom-POPowerPlanListLines {
@@ -110,6 +117,167 @@ function ConvertFrom-POPowerQueryLines {
         }
     }
     return $settings
+}
+
+function ConvertFrom-POPowerSettingsSnapshot {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$PlanGuid,
+          [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Lines)
+    $parsedGuid = [guid]::Empty
+    if (-not [guid]::TryParse($PlanGuid, [ref]$parsedGuid)) { throw 'Cannot snapshot a power plan with an invalid GUID.' }
+    $catalog = Get-POPowerSettingCatalog
+    $parsed = @(ConvertFrom-POPowerQueryLines -Lines $Lines)
+    $records = @()
+    foreach ($setting in @($catalog.settings)) {
+        $subgroupGuid = [string]$catalog.subgroups.([string]$setting.subgroup).ToLowerInvariant()
+        $acGuid = [string]$setting.guid
+        $dcGuid = if ($setting.PSObject.Properties['dcGuid'] -and $setting.dcGuid) { [string]$setting.dcGuid } else { $acGuid }
+        $acRecord = @($parsed | Where-Object { $_.SubgroupGuid -eq $subgroupGuid -and $_.SettingGuid -eq $acGuid.ToLowerInvariant() -and $null -ne $_.AcIndex } | Select-Object -First 1)
+        $dcRecord = @($parsed | Where-Object { $_.SubgroupGuid -eq $subgroupGuid -and $_.SettingGuid -eq $dcGuid.ToLowerInvariant() -and $null -ne $_.DcIndex } | Select-Object -First 1)
+        $records += [pscustomobject][ordered]@{
+            Id = [string]$setting.id
+            SubgroupGuid = $subgroupGuid
+            AcGuid = $acGuid.ToLowerInvariant()
+            DcGuid = $dcGuid.ToLowerInvariant()
+            AcCaptured = ($acRecord.Count -gt 0)
+            AcValue = if ($acRecord.Count -gt 0) { [int]$acRecord[0].AcIndex } else { $null }
+            DcCaptured = ($dcRecord.Count -gt 0)
+            DcValue = if ($dcRecord.Count -gt 0) { [int]$dcRecord[0].DcIndex } else { $null }
+        }
+    }
+    return [pscustomobject][ordered]@{
+        SchemaVersion = 1
+        PlanGuid = $parsedGuid.ToString().ToLowerInvariant()
+        CapturedAtUtc = [DateTime]::UtcNow.ToString('o')
+        ParsedSettingCount = $parsed.Count
+        Settings = $records
+    }
+}
+
+function Get-POPlatinumPowerSettingsSnapshot {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$PlanGuid)
+    $parsedGuid = [guid]::Empty
+    if (-not [guid]::TryParse($PlanGuid, [ref]$parsedGuid)) { throw 'Cannot query a power plan with an invalid GUID.' }
+    $query = Invoke-POPowercfg -Arguments @('/qh', $parsedGuid.ToString())
+    if ($query.TimedOut) { throw 'powercfg /qh timed out after 30 seconds; existing plan settings were not changed.' }
+    if ($query.ExitCode -ne 0) { throw "powercfg /qh failed with exit code $($query.ExitCode): $(($query.Output -join ' ').Trim())" }
+    return (ConvertFrom-POPowerSettingsSnapshot -PlanGuid $parsedGuid.ToString() -Lines $query.Output)
+}
+
+function Test-POPowerCatalogValue {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][psobject]$Definition,
+          [Parameter(Mandatory = $true)][int]$Value)
+    switch ([string]$Definition.unit) {
+        'percent' { return ($Value -ge [int]$Definition.min -and $Value -le [int]$Definition.max) }
+        'seconds' { return ($Value -ge 0 -and $Value -le 86400) }
+        'enum' {
+            $allowed = @($Definition.values.PSObject.Properties | ForEach-Object { [int]$_.Name })
+            return ($Value -in $allowed)
+        }
+        default { return $false }
+    }
+}
+
+function Restore-POPlatinumPowerSettingsSnapshot {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$PlanGuid,
+          [Parameter(Mandatory = $true)][psobject]$Snapshot,
+          [AllowNull()][string[]]$SettingKeys = $null)
+    $parsedGuid = [guid]::Empty
+    if (-not [guid]::TryParse($PlanGuid, [ref]$parsedGuid)) { throw 'Cannot restore power settings with an invalid plan GUID.' }
+    if ($null -eq $Snapshot.PSObject.Properties['SchemaVersion'] -or [int]$Snapshot.SchemaVersion -ne 1) { throw 'The power-settings backup schema is not supported.' }
+    if ($null -eq $Snapshot.PSObject.Properties['PlanGuid']) { throw 'The power-settings backup has no plan GUID.' }
+    $snapshotGuid = [guid]::Empty
+    if (-not [guid]::TryParse([string]$Snapshot.PlanGuid, [ref]$snapshotGuid) -or $snapshotGuid.ToString() -ne $parsedGuid.ToString()) { throw 'The power-settings backup does not match the Platinum plan GUID.' }
+    if ($null -eq $Snapshot.PSObject.Properties['Settings']) { throw 'The power-settings backup has no setting list.' }
+
+    $catalog = Get-POPowerSettingCatalog
+    $settingsById = @{}
+    foreach ($definition in @($catalog.settings)) { $settingsById[[string]$definition.id] = $definition }
+    $filterRequested = $PSBoundParameters.ContainsKey('SettingKeys')
+    $settingKeySet = @{}
+    if ($filterRequested) {
+        foreach ($settingKey in @($SettingKeys)) {
+            $keyMatch = [regex]::Match([string]$settingKey, '^(?<id>[a-z0-9-]+)\|(?<side>AC|DC)$', 'IgnoreCase')
+            if (-not $keyMatch.Success -or -not $settingsById.ContainsKey($keyMatch.Groups['id'].Value)) { throw "The selected restore setting key '$settingKey' is invalid or unsupported." }
+            $settingKeySet[($keyMatch.Groups['id'].Value + '|' + $keyMatch.Groups['side'].Value.ToUpperInvariant())] = $true
+        }
+    }
+    $prepared = @()
+    $seenIds = @{}
+    foreach ($record in @($Snapshot.Settings)) {
+        if ($null -eq $record) { throw 'The power-settings backup contains a null record.' }
+        foreach ($field in @('Id', 'AcCaptured', 'AcValue', 'DcCaptured', 'DcValue')) {
+            if ($null -eq $record.PSObject.Properties[$field]) { throw "A power-settings backup record is missing '$field'." }
+        }
+        $id = [string]$record.Id
+        if (-not $settingsById.ContainsKey($id)) { throw "Snapshot references unrecognized power setting '$id'." }
+        if ($seenIds.ContainsKey($id)) { throw "Snapshot contains a duplicate power setting '$id'." }
+        $seenIds[$id] = $true
+        $definition = $settingsById[$id]
+        $acValue = $null
+        $dcValue = $null
+        if ([bool]$record.AcCaptured) {
+            $parsedValue = 0
+            if (-not [int]::TryParse([string]$record.AcValue, [ref]$parsedValue) -or -not (Test-POPowerCatalogValue -Definition $definition -Value $parsedValue)) { throw "$($definition.name): captured AC index is invalid or outside the documented range." }
+            $acValue = $parsedValue
+        }
+        if ([bool]$record.DcCaptured) {
+            $parsedValue = 0
+            if (-not [int]::TryParse([string]$record.DcValue, [ref]$parsedValue) -or -not (Test-POPowerCatalogValue -Definition $definition -Value $parsedValue)) { throw "$($definition.name): captured DC index is invalid or outside the documented range." }
+            $dcValue = $parsedValue
+        }
+        $prepared += [pscustomobject][ordered]@{ Id = $id; Definition = $definition; AcCaptured = [bool]$record.AcCaptured; AcValue = $acValue; DcCaptured = [bool]$record.DcCaptured; DcValue = $dcValue }
+    }
+    if ($filterRequested) {
+        foreach ($selectedKey in @($settingKeySet.Keys)) {
+            $parts = [string]$selectedKey -split '\|', 2
+            $selectedRecord = @($prepared | Where-Object { $_.Id -eq $parts[0] } | Select-Object -First 1)
+            if ($selectedRecord.Count -eq 0) { throw "The selected restore setting '$selectedKey' is not present in the backup." }
+            $selectedCaptured = if ($parts[1] -eq 'AC') { [bool]$selectedRecord[0].AcCaptured } else { [bool]$selectedRecord[0].DcCaptured }
+            if (-not $selectedCaptured) { throw "The selected restore setting '$selectedKey' has no captured baseline value." }
+        }
+    }
+
+    $applied = @(); $failed = @(); $skipped = @()
+    foreach ($record in $prepared) {
+        $definition = $record.Definition
+        $subgroupGuid = [string]$catalog.subgroups.([string]$definition.subgroup)
+        $acGuid = [string]$definition.guid
+        $dcGuid = if ($definition.PSObject.Properties['dcGuid'] -and $definition.dcGuid) { [string]$definition.dcGuid } else { $acGuid }
+        $restoreAc = (-not $filterRequested -or $settingKeySet.ContainsKey(([string]$record.Id + '|AC')))
+        $restoreDc = (-not $filterRequested -or $settingKeySet.ContainsKey(([string]$record.Id + '|DC')))
+        if ($restoreAc -and $record.AcCaptured) {
+            $setAc = Invoke-POPowercfg -Arguments @('/setacvalueindex', $parsedGuid.ToString(), $subgroupGuid, $acGuid, [string]$record.AcValue)
+            if ($setAc.ExitCode -eq 0 -and -not $setAc.TimedOut) { $applied += [pscustomobject]@{ Id = $record.Id; Side = 'AC'; Value = $record.AcValue } }
+            else { $failed += "$($definition.name): restoring AC value failed (exit code $($setAc.ExitCode), timeout=$($setAc.TimedOut))." }
+        }
+        elseif ($restoreAc) { $skipped += "$($definition.name): AC value was not exposed in the verified backup." }
+        if ($restoreDc -and $record.DcCaptured) {
+            $setDc = Invoke-POPowercfg -Arguments @('/setdcvalueindex', $parsedGuid.ToString(), $subgroupGuid, $dcGuid, [string]$record.DcValue)
+            if ($setDc.ExitCode -eq 0 -and -not $setDc.TimedOut) { $applied += [pscustomobject]@{ Id = $record.Id; Side = 'DC'; Value = $record.DcValue } }
+            else { $failed += "$($definition.name): restoring DC value failed (exit code $($setDc.ExitCode), timeout=$($setDc.TimedOut))." }
+        }
+        elseif ($restoreDc) { $skipped += "$($definition.name): DC value was not exposed in the verified backup." }
+    }
+    if ($failed.Count -eq 0 -and $applied.Count -gt 0) {
+        try {
+            $actual = Get-POPlatinumPowerSettingsSnapshot -PlanGuid $parsedGuid.ToString()
+            foreach ($record in $prepared) {
+                $restoreAc = (-not $filterRequested -or $settingKeySet.ContainsKey(([string]$record.Id + '|AC')))
+                $restoreDc = (-not $filterRequested -or $settingKeySet.ContainsKey(([string]$record.Id + '|DC')))
+                if (-not $restoreAc -and -not $restoreDc) { continue }
+                $actualRecord = @($actual.Settings | Where-Object { $_.Id -eq $record.Id } | Select-Object -First 1)
+                if ($actualRecord.Count -eq 0) { $failed += "$($record.Id): setting was missing during restore verification."; continue }
+                if ($restoreAc -and $record.AcCaptured -and (-not [bool]$actualRecord[0].AcCaptured -or [int]$actualRecord[0].AcValue -ne [int]$record.AcValue)) { $failed += "$($record.Id): restored AC value could not be verified." }
+                if ($restoreDc -and $record.DcCaptured -and (-not [bool]$actualRecord[0].DcCaptured -or [int]$actualRecord[0].DcValue -ne [int]$record.DcValue)) { $failed += "$($record.Id): restored DC value could not be verified." }
+            }
+        }
+        catch { $failed += "Power-setting restore verification failed: $($_.Exception.Message)" }
+    }
+    return [pscustomobject][ordered]@{ Applied = $applied; Failed = $failed; Skipped = $skipped; Verified = ($failed.Count -eq 0) }
 }
 
 function Get-POPlatinumPresetCatalog {
@@ -166,9 +334,10 @@ function Find-POPlatinumPlanEntry {
     param()
     $name = Get-POPlatinumPlanName
     $plans = @(Get-POPowerPlans)
-    $match = @($plans | Where-Object { [string]$_.Name -eq $name } | Select-Object -First 1)
-    if ($match.Count -eq 0) { return $null }
-    return $match[0]
+    $matches = @($plans | Where-Object { [string]$_.Name -eq $name })
+    if ($matches.Count -gt 1) { throw "Multiple power schemes are named '$name'; no scheme was selected or changed. Resolve the duplicate names in Windows Power Options and retry." }
+    if ($matches.Count -eq 0) { return $null }
+    return $matches[0]
 }
 
 function Get-POPlatinumPlanInfo {
@@ -230,7 +399,7 @@ function Get-POPlatinumPlanInfo {
 
 function New-POPlatinumPlan {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
-    param()
+    param([AllowNull()][string]$BasePlanGuid)
     if (-not (Test-POIsWindows)) { throw 'The Platinum power plan is available only on Windows.' }
     if (-not (Get-Command powercfg.exe -ErrorAction SilentlyContinue)) { throw 'powercfg.exe is not available on this system.' }
     $catalog = Get-POPowerSettingCatalog
@@ -243,12 +412,17 @@ function New-POPlatinumPlan {
         }
         return [pscustomobject][ordered]@{ Status = 'EXISTS_INVALID'; PlanGuid = [string]$existing.Guid; Created = $false; Message = "The '$name' plan exists but powercfg could not query it (exit code $($query.ExitCode)). Review it manually; no duplicate was created." }
     }
-    if (-not $PSCmdlet.ShouldProcess($name, 'Create the Platinum On Steroids power plan from the High Performance base scheme')) {
-        return [pscustomobject][ordered]@{ Status = 'SIMULATED'; PlanGuid = $null; Created = $false; Message = "Dry run: would duplicate the High Performance scheme, rename it to '$name', and verify it. No plan was created." }
+    if (-not $PSCmdlet.ShouldProcess($name, 'Create the Platinum On Steroids power plan from the active Windows scheme')) {
+        return [pscustomobject][ordered]@{ Status = 'SIMULATED'; PlanGuid = $null; Created = $false; Message = "Dry run: would duplicate the current active scheme (Balanced fallback), rename it to '$name', and verify it. No plan was created." }
     }
     if (-not (Test-POIsAdministrator)) { throw 'Creating a power plan requires an elevated Administrator session.' }
-    $baseGuid = [string]$catalog.builtinSchemes.([string]$catalog.duplicateBaseScheme)
-    $plansBefore = @(Get-POPowerPlans | ForEach-Object { [string]$_.Guid })
+    $plansBefore = @(Get-POPowerPlans | ForEach-Object { [string]$_.Guid.ToLowerInvariant() })
+    if ([string]::IsNullOrWhiteSpace($BasePlanGuid)) { $BasePlanGuid = Get-POActivePowerPlanGuid }
+    if ([string]::IsNullOrWhiteSpace($BasePlanGuid)) { $BasePlanGuid = [string]$catalog.builtinSchemes.([string]$catalog.duplicateBaseScheme) }
+    $parsedBaseGuid = [guid]::Empty
+    if (-not [guid]::TryParse($BasePlanGuid, [ref]$parsedBaseGuid)) { throw 'The selected source power plan GUID is invalid.' }
+    $baseGuid = $parsedBaseGuid.ToString().ToLowerInvariant()
+    if ($baseGuid -notin $plansBefore) { throw "The source power plan $baseGuid is not installed; no custom plan was created." }
     $duplicate = Invoke-POPowercfg -Arguments @('/duplicatescheme', $baseGuid)
     if ($duplicate.ExitCode -ne 0) {
         throw "powercfg /duplicatescheme failed with exit code $($duplicate.ExitCode): $(($duplicate.Output -join ' ').Trim())"
@@ -286,11 +460,11 @@ function New-POPlatinumPlan {
         AppliedAtUtc = $null
         PlanExportPath = $exportPath
         RestoredAtUtc = $null
-        Notes = 'Created from the documented High Performance scheme with powercfg /duplicatescheme. Existing user plans were preserved.'
+        Notes = 'Created from the current active Windows scheme (Balanced fallback) with powercfg /duplicatescheme. Existing user plans were preserved.'
     }
     Set-POPlatinumState -State $state
     Write-POLog -Category 'Power' -TweakId 'platinum-power-plan' -Status 'CREATED' -Message "Created power plan '$name' ($newGuid) from base scheme $baseGuid."
-    return [pscustomobject][ordered]@{ Status = 'CREATED'; PlanGuid = $newGuid; Created = $true; Message = "Created '$name' ($newGuid) from the High Performance base scheme. Existing plans were preserved." }
+    return [pscustomobject][ordered]@{ Status = 'CREATED'; PlanGuid = $newGuid; Created = $true; Message = "Created '$name' ($newGuid) from the selected active Windows scheme. Existing plans were preserved." }
 }
 
 function Invoke-POPlatinumPresetValues {
@@ -300,58 +474,121 @@ function Invoke-POPlatinumPresetValues {
         [Parameter(Mandatory = $true)][psobject]$Preset
     )
     $catalog = Get-POPowerSettingCatalog
-    $applied = @(); $skipped = @(); $failed = @()
+    $baseline = Get-POPlatinumPowerSettingsSnapshot -PlanGuid $PlanGuid
+    $changes = @()
+    $abortVerification = $false
     foreach ($setting in @($catalog.settings)) {
         $settingId = [string]$setting.id
         $acValue = Get-POPresetSettingValue -Side $Preset.ac -SettingId $settingId
         $dcValue = Get-POPresetSettingValue -Side $Preset.dc -SettingId $settingId
         if ($null -eq $acValue -and $null -eq $dcValue) { continue }
-        $subgroupGuid = [string]$catalog.subgroups.([string]$setting.subgroup)
-        $optional = ($setting.PSObject.Properties['optional'] -and [bool]$setting.optional)
-        $settingOk = $true
-        if ($null -ne $acValue) {
-            $setAc = Invoke-POPowercfg -Arguments @('/setacvalueindex', $PlanGuid, $subgroupGuid, [string]$setting.guid, [string]$acValue)
-            if ($setAc.ExitCode -ne 0) { $settingOk = $false; $skipped += "$($setting.name): AC value $acValue was rejected by powercfg (exit code $($setAc.ExitCode)); setting left unchanged." }
-        }
-        if ($null -ne $dcValue -and $settingOk) {
-            $dcGuid = if ($setting.PSObject.Properties['dcGuid'] -and $setting.dcGuid) { [string]$setting.dcGuid } else { [string]$setting.guid }
-            $setDc = Invoke-POPowercfg -Arguments @('/setdcvalueindex', $PlanGuid, $subgroupGuid, $dcGuid, [string]$dcValue)
-            if ($setDc.ExitCode -ne 0) { $settingOk = $false; $skipped += "$($setting.name): DC value $dcValue was rejected by powercfg (exit code $($setDc.ExitCode)); setting left unchanged." }
-        }
-        if (-not $settingOk) {
-            if (-not $optional) { $failed += "$($setting.name): a documented mandatory setting could not be applied." }
+        $baselineEntry = @($baseline.Settings | Where-Object { $_.Id -eq $settingId } | Select-Object -First 1)
+        if ($baselineEntry.Count -eq 0) {
+            $changes += [pscustomobject][ordered]@{ Id = $settingId; Name = [string]$setting.name; Status = 'UNVERIFIED'; Attempted = $false; Verified = $false; PreviousValue = $null; TargetValue = $null; Reason = 'The pre-change setting snapshot did not contain this catalog setting.'; RequiresReboot = $false }
             continue
         }
-        # Verify by re-reading the plan.
-        $query = Invoke-POPowercfg -Arguments @('/qh', $PlanGuid)
-        if ($query.ExitCode -ne 0) { $failed += "$($setting.name): verification query failed with exit code $($query.ExitCode)."; continue }
-        $parsed = @(ConvertFrom-POPowerQueryLines -Lines $query.Output)
-        $verified = $true
-        $acGuid = [string]$setting.guid
-        $dcGuid = if ($setting.PSObject.Properties['dcGuid'] -and $setting.dcGuid) { [string]$setting.dcGuid } else { [string]$setting.guid }
-        if ($null -ne $acValue) {
-            $acRecord = @($parsed | Where-Object { $_.SubgroupGuid -eq $subgroupGuid -and $_.SettingGuid -eq $acGuid.ToLowerInvariant() -and $null -ne $_.AcIndex } | Select-Object -First 1)
-            if ($acRecord.Count -eq 0 -or [int]$acRecord[0].AcIndex -ne $acValue) { $verified = $false }
+        $baselineEntry = $baselineEntry[0]
+        $sides = @(
+            [pscustomobject]@{ Name = 'AC'; Target = $acValue; Captured = [bool]$baselineEntry.AcCaptured; Current = $baselineEntry.AcValue; Command = '/setacvalueindex'; Guid = [string]$setting.guid; ValueProperty = 'AcValue'; CapturedProperty = 'AcCaptured' },
+            [pscustomobject]@{ Name = 'DC'; Target = $dcValue; Captured = [bool]$baselineEntry.DcCaptured; Current = $baselineEntry.DcValue; Command = '/setdcvalueindex'; Guid = [string]$baselineEntry.DcGuid; ValueProperty = 'DcValue'; CapturedProperty = 'DcCaptured' }
+        )
+        foreach ($side in $sides) {
+            if ($null -eq $side.Target) { continue }
+            if (-not $side.Captured) {
+                $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'SKIPPED'; Attempted = $false; Verified = $false; PreviousValue = $null; TargetValue = [int]$side.Target; Reason = 'Windows did not expose this setting for the selected power scheme; it was not written.'; RequiresReboot = $false }
+                continue
+            }
+            if ([int]$side.Current -eq [int]$side.Target) {
+                $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'ALREADY_OPTIMIZED'; Attempted = $false; Verified = $true; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = 'Windows already reports the requested value.'; RequiresReboot = $false }
+                continue
+            }
+            $subgroupGuid = [string]$catalog.subgroups.([string]$setting.subgroup)
+            try { $set = Invoke-POPowercfg -Arguments @([string]$side.Command, $PlanGuid, $subgroupGuid, [string]$side.Guid, [string][int]$side.Target) }
+            catch {
+                $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'UNVERIFIED'; Attempted = $true; Verified = $false; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = "The powercfg command could not be confirmed: $($_.Exception.Message)"; RequiresReboot = $false }
+                $abortVerification = $true
+                break
+            }
+            if ($set.TimedOut -or $set.ExitCode -ne 0) {
+                $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'FAILED'; Attempted = $true; Verified = $false; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = "powercfg rejected or timed out applying this setting (exit code $($set.ExitCode), timeout=$($set.TimedOut)): $(($set.Output -join ' ').Trim())"; RequiresReboot = $false }
+                continue
+            }
+            try {
+                $after = Get-POPlatinumPowerSettingsSnapshot -PlanGuid $PlanGuid
+                $afterEntry = @($after.Settings | Where-Object { $_.Id -eq $settingId } | Select-Object -First 1)
+                $verified = $false
+                $actualValue = $null
+                if ($afterEntry.Count -gt 0) {
+                    $actualProperty = $afterEntry[0].PSObject.Properties[[string]$side.ValueProperty]
+                    $capturedProperty = $afterEntry[0].PSObject.Properties[[string]$side.CapturedProperty]
+                    if ($actualProperty -and $capturedProperty -and [bool]$capturedProperty.Value) {
+                        $actualValue = [int]$actualProperty.Value
+                        $verified = ($actualValue -eq [int]$side.Target)
+                    }
+                }
+                if ($verified) {
+                    $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'APPLIED_VERIFIED'; Attempted = $true; Verified = $true; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = 'Written and read back from powercfg.'; RequiresReboot = $false }
+                }
+                else {
+                    $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'UNVERIFIED'; Attempted = $true; Verified = $false; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = "The powercfg write returned success, but read-back reported '$actualValue'."; RequiresReboot = $false }
+                    $abortVerification = $true
+                    break
+                }
+            }
+            catch {
+                $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'UNVERIFIED'; Attempted = $true; Verified = $false; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = "Post-write verification failed: $($_.Exception.Message)"; RequiresReboot = $false }
+                $abortVerification = $true
+                break
+            }
         }
-        if ($null -ne $dcValue -and $verified) {
-            $dcRecord = @($parsed | Where-Object { $_.SubgroupGuid -eq $subgroupGuid -and $_.SettingGuid -eq $dcGuid.ToLowerInvariant() -and $null -ne $_.DcIndex } | Select-Object -First 1)
-            if ($dcRecord.Count -eq 0 -or [int]$dcRecord[0].DcIndex -ne $dcValue) { $verified = $false }
-        }
-        if (-not $verified) {
-            if ($optional) { $skipped += "$($setting.name): powercfg accepted the value but verification could not confirm it; treat as not applied." }
-            else { $failed += "$($setting.name): verification mismatch after apply." }
-            continue
-        }
-        $applied += "$($setting.name): AC $(if ($null -ne $acValue) { $acValue } else { 'unchanged' }) / DC $(if ($null -ne $dcValue) { $dcValue } else { 'unchanged' })"
+        if ($abortVerification) { break }
     }
-    return [pscustomobject][ordered]@{ Applied = $applied; Skipped = $skipped; Failed = $failed }
+    $applied = @($changes | Where-Object { $_.Status -eq 'APPLIED_VERIFIED' })
+    $already = @($changes | Where-Object { $_.Status -eq 'ALREADY_OPTIMIZED' })
+    $skipped = @($changes | Where-Object { $_.Status -eq 'SKIPPED' })
+    $failed = @($changes | Where-Object { $_.Status -eq 'FAILED' })
+    $unverified = @($changes | Where-Object { $_.Status -eq 'UNVERIFIED' })
+    return [pscustomobject][ordered]@{
+        Changes = $changes
+        Applied = $applied
+        AlreadyOptimized = $already
+        Skipped = $skipped
+        Failed = $failed
+        Unverified = $unverified
+        AttemptedCount = @($changes | Where-Object { $_.Attempted }).Count
+    }
+}
+
+function ConvertTo-POPowerSettingWriteLedger {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Changes)
+    $writes = @()
+    foreach ($change in @($Changes)) {
+        if ($null -eq $change) { continue }
+        $attemptedProperty = $change.PSObject.Properties['Attempted']
+        if ($null -eq $attemptedProperty -or -not [bool]$attemptedProperty.Value) { continue }
+        foreach ($field in @('Id', 'PreviousValue', 'TargetValue', 'Status', 'Verified')) {
+            if ($null -eq $change.PSObject.Properties[$field]) { throw "An attempted power-setting result is missing '$field'; the write cannot be safely recorded." }
+        }
+        $writes += [pscustomobject][ordered]@{
+            Id = [string]$change.Id
+            Attempted = $true
+            Status = [string]$change.Status
+            Verified = [bool]$change.Verified
+            PreviousValue = $change.PreviousValue
+            TargetValue = $change.TargetValue
+        }
+    }
+    return $writes
 }
 
 function Invoke-POPlatinumPlanWorkflow {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param(
         [Parameter(Mandatory = $true)][string]$PresetId,
-        [switch]$Activate
+        [switch]$Activate,
+        [AllowNull()][scriptblock]$OnBackupCreated = $null,
+        [AllowNull()][scriptblock]$OnVerifiedBackup = $null
     )
     if (-not (Test-POIsWindows)) { throw 'The Platinum power plan workflow is available only on Windows.' }
     if (-not (Get-Command powercfg.exe -ErrorAction SilentlyContinue)) { throw 'powercfg.exe is not available on this system.' }
@@ -364,77 +601,286 @@ function Invoke-POPlatinumPlanWorkflow {
     $activeBefore = Get-POActivePowerPlanGuid
     if ([string]::IsNullOrWhiteSpace($activeBefore)) { throw 'The currently active power plan could not be read; a verified restore target is unavailable, so no change is made.' }
     $existing = Find-POPlatinumPlanEntry
-    $planAction = if ($existing) { "update the existing '$(Get-POPlatinumPlanName)' plan" } else { "create the '$(Get-POPlatinumPlanName)' plan from the High Performance scheme" }
-    $activationText = if ($Activate) { ' Then activate it.' } else { ' Do not activate it.' }
+    $existingBefore = [bool]$existing
+    $planAction = if ($existing) { "reuse and update the existing '$(Get-POPlatinumPlanName)' plan" } else { "create the '$(Get-POPlatinumPlanName)' plan from the currently active Windows scheme" }
+    $activationText = if ($Activate) { ' Then activate and verify it.' } else { ' Leave the active plan unchanged.' }
     if (-not $PSCmdlet.ShouldProcess((Get-POPlatinumPlanName), "Apply the $($preset.name) preset: $planAction.$activationText")) {
-        return [pscustomobject][ordered]@{ Status = 'SIMULATED'; Message = "Dry run: would $planAction with the $($preset.name) preset.$activationText No plan, setting, or backup was changed."; PlanGuid = if ($existing) { [string]$existing.Guid } else { $null }; Backup = $null }
+        return [pscustomobject][ordered]@{
+            Status = 'SIMULATED'; Message = "Dry run: would $planAction with the $($preset.name) preset.$activationText No plan, setting, or backup was changed."
+            PlanGuid = if ($existing) { [string]$existing.Guid } else { $null }; Backup = $null; Changes = @(); PlanCreated = $false; Activated = $false
+        }
     }
     if (-not (Test-POIsAdministrator)) { throw 'Creating and configuring a power plan requires an elevated Administrator session.' }
 
-    $createResult = New-POPlatinumPlan -Confirm:$false
-    if ($createResult.Status -eq 'EXISTS_INVALID') { throw $createResult.Message }
-    $planGuid = [string]$createResult.PlanGuid
+    # Capture the existing Platinum plan values before creating any backup or
+    # changing the scheme. The backup itself is written and checksum-verified
+    # before New-POPlatinumPlan or any set/activate command can run.
+    $settingsBefore = $null
+    if ($existingBefore) { $settingsBefore = Get-POPlatinumPowerSettingsSnapshot -PlanGuid ([string]$existing.Guid) }
+    $backupState = [pscustomobject][ordered]@{
+        SchemaVersion = 1
+        OriginalActivePlanGuid = [string]$activeBefore
+        PlatinumPlanGuid = if ($existingBefore) { [string]$existing.Guid } else { $null }
+        PlatinumPlanExistedBefore = $existingBefore
+        PresetId = $PresetId
+        PlanName = Get-POPlatinumPlanName
+        PowerSettingsSnapshotFile = if ($existingBefore) { 'power\platinum-settings-before.json' } else { $null }
+        CapturedAtUtc = [DateTime]::UtcNow.ToString('o')
+    }
+    $backup = New-POBackup -PlatinumState $backupState `
+        -PlatinumPlanGuid $(if ($existingBefore) { [string]$existing.Guid } else { $null }) `
+        -PowerSettingsSnapshot $settingsBefore
+    $backupValidation = Test-POBackup -Path $backup.Path
+    if (-not $backupValidation.Valid) { throw ('Configuration backup failed checksum/path verification: ' + (@($backupValidation.Issues) -join '; ')) }
+    if ($null -ne $OnBackupCreated) {
+        try { & $OnBackupCreated $backup }
+        catch { throw "The verified backup was created at $($backup.Path), but its reporting callback failed before system changes. $($_.Exception.Message)" }
+    }
+    $activeExportPath = Join-Path $backup.Path 'power\active-plan.pow'
+    if (-not (Test-Path -LiteralPath $activeExportPath -PathType Leaf) -or (Get-Item -LiteralPath $activeExportPath -Force).Length -le 0) {
+        throw 'The active power scheme could not be exported and verified. System changes were blocked.'
+    }
+    if ($existingBefore) {
+        $platinumExportPath = Join-Path $backup.Path 'power\platinum-plan-before.pow'
+        if (-not (Test-Path -LiteralPath $platinumExportPath -PathType Leaf) -or (Get-Item -LiteralPath $platinumExportPath -Force).Length -le 0) {
+            throw 'The existing Platinum plan could not be exported and verified. Its settings were not changed.'
+        }
+        $snapshotPath = Join-Path $backup.Path 'power\platinum-settings-before.json'
+        if (-not (Test-Path -LiteralPath $snapshotPath -PathType Leaf)) { throw 'The existing Platinum settings snapshot is missing; its settings were not changed.' }
+    }
 
+    if ($null -ne $OnVerifiedBackup) {
+        try { & $OnVerifiedBackup $backup }
+        catch { throw "A pre-change backup callback failed; the verified configuration backup remains at $($backup.Path), and the Platinum plan was not changed. $($_.Exception.Message)" }
+    }
+
+    $createResult = New-POPlatinumPlan -BasePlanGuid $activeBefore -Confirm:$false
+    if ($createResult.Status -eq 'EXISTS_INVALID') { throw $createResult.Message }
+    if ($createResult.Status -notin @('CREATED', 'EXISTS_VALIDATED')) { throw "The custom power plan was not created or validated: $($createResult.Message)" }
+    $planGuid = [string]$createResult.PlanGuid
+    $createdByThisRun = [bool]$createResult.Created
+
+    $changeRecord = [pscustomobject][ordered]@{
+        section = 'power'
+        id = 'platinum-power-plan'
+        name = "Platinum On Steroids power plan ($($preset.name))"
+        fromGuid = [string]$activeBefore
+        toGuid = $planGuid
+        platinumPlanGuid = $planGuid
+        preset = $PresetId
+        activate = [bool]$Activate
+        createdByThisRun = $createdByThisRun
+        platinumPlanExistedBefore = $existingBefore
+        expectedSettings = [pscustomobject][ordered]@{ ac = $preset.ac; dc = $preset.dc }
+        status = 'APPLYING'
+        timestampUtc = [DateTime]::UtcNow.ToString('o')
+    }
+    try { Add-POBackupChange -BackupPath $backup.Path -Section power -Change $changeRecord }
+    catch {
+        if ($createdByThisRun -and (Get-POActivePowerPlanGuid) -eq $activeBefore) {
+            $createdEntry = @(Get-POPowerPlans | Where-Object { $_.Guid -eq $planGuid -and $_.Name -eq (Get-POPlatinumPlanName) } | Select-Object -First 1)
+            if ($createdEntry.Count -gt 0) { [void](Invoke-POPowercfg -Arguments @('/delete', $planGuid)) }
+        }
+        throw "The verified backup could not record the power transaction; no power setting was changed. $($_.Exception.Message)"
+    }
+
+    $values = $null
     $state = Get-POPlatinumState
     if ($null -eq $state -or -not $state.PlanGuid -or [string]$state.PlanGuid -ne $planGuid) {
         $state = [pscustomobject][ordered]@{
-            PlanName = Get-POPlatinumPlanName; PlanGuid = $planGuid; BaseSchemeGuid = [string]$catalog.builtinSchemes.([string]$catalog.duplicateBaseScheme)
-            CreatedAtUtc = [DateTime]::UtcNow.ToString('o'); OriginalActivePlanGuid = $null; AppliedPresetId = $null; AppliedAtUtc = $null; PlanExportPath = $null; RestoredAtUtc = $null
+            PlanName = Get-POPlatinumPlanName
+            PlanGuid = $planGuid
+            BaseSchemeGuid = [string]$activeBefore
+            CreatedAtUtc = [DateTime]::UtcNow.ToString('o')
+            OriginalActivePlanGuid = $null
+            AppliedPresetId = $null
+            AppliedAtUtc = $null
+            PlanExportPath = $null
+            RestoredAtUtc = $null
         }
     }
-    if (-not $state.OriginalActivePlanGuid) {
-        if ($state.PSObject.Properties['OriginalActivePlanGuid']) { $state.OriginalActivePlanGuid = $activeBefore }
-        else { $state | Add-Member -MemberType NoteProperty -Name 'OriginalActivePlanGuid' -Value $activeBefore }
-    }
-    $backupState = [pscustomobject][ordered]@{
-        OriginalActivePlanGuid = [string]$activeBefore
-        PlatinumPlanGuid = $planGuid
-        PresetId = $PresetId
-        PlanName = Get-POPlatinumPlanName
-        PlansPreserved = @(Get-POPowerPlans | ForEach-Object { [pscustomobject]@{ Guid = $_.Guid; Name = $_.Name } })
-        CapturedAtUtc = [DateTime]::UtcNow.ToString('o')
-    }
-    $backup = New-POBackup -PlatinumState $backupState
-    $changeRecord = [pscustomobject][ordered]@{
-        section = 'power'; id = 'platinum-power-plan'; name = "Platinum On Steroids power plan ($($preset.name))"
-        fromGuid = [string]$activeBefore; toGuid = $planGuid; preset = $PresetId; activate = [bool]$Activate
-        status = 'APPLYING'; timestampUtc = [DateTime]::UtcNow.ToString('o')
-    }
-    Add-POBackupChange -BackupPath $backup.Path -Section power -Change $changeRecord
+    if ([string]::IsNullOrWhiteSpace([string]$state.OriginalActivePlanGuid)) { $state.OriginalActivePlanGuid = $activeBefore }
+    $activationChanged = $false
     try {
         $values = Invoke-POPlatinumPresetValues -PlanGuid $planGuid -Preset $preset
-        if ($values.Failed.Count -gt 0) { throw ('Preset application failed: ' + ($values.Failed -join '; ')) }
-        $activated = $false
-        if ($Activate) {
-            if ((Get-POActivePowerPlanGuid) -ne $activeBefore) { throw 'The active plan changed during the workflow; the newer selection was left untouched.' }
-            [void](Set-POActivePowerPlan -Guid ([guid]$planGuid))
-            $activated = $true
+        if ($values.Failed.Count -gt 0 -or $values.Unverified.Count -gt 0) {
+            $details = @($values.Failed | ForEach-Object { $_.Reason }) + @($values.Unverified | ForEach-Object { $_.Reason })
+            throw ('One or more power settings failed or could not be verified: ' + ($details -join '; '))
         }
-        if ($state.PSObject.Properties['AppliedPresetId']) { $state.AppliedPresetId = $PresetId } else { $state | Add-Member -MemberType NoteProperty -Name 'AppliedPresetId' -Value $PresetId }
-        if ($state.PSObject.Properties['AppliedAtUtc']) { $state.AppliedAtUtc = [DateTime]::UtcNow.ToString('o') } else { $state | Add-Member -MemberType NoteProperty -Name 'AppliedAtUtc' -Value ([DateTime]::UtcNow.ToString('o')) }
+        $currentActive = Get-POActivePowerPlanGuid
+        if ($Activate) {
+            if ($currentActive -eq $planGuid) {
+                $activationChanged = $false
+            }
+            elseif ($currentActive -ne $activeBefore) {
+                throw "The active plan changed during optimization to '$currentActive'; that newer user choice was left untouched."
+            }
+            else {
+                [void](Set-POActivePowerPlan -Guid ([guid]$planGuid))
+                $activationChanged = $true
+            }
+        }
+        $activeAfter = Get-POActivePowerPlanGuid
+        $activated = ([bool]$Activate -and $activeAfter -eq $planGuid)
+        if ($Activate -and -not $activated) { throw "Active-plan verification failed. Windows reports '$activeAfter', not '$planGuid'." }
+        $state.AppliedPresetId = $PresetId
+        $state.AppliedAtUtc = [DateTime]::UtcNow.ToString('o')
         Set-POPlatinumState -State $state
-        $summary = "Preset $($preset.name): $($values.Applied.Count) settings applied and verified, $($values.Skipped.Count) skipped."
-        Update-POBackupChangeStatus -BackupPath $backup.Path -Section power -Status 'APPLIED_VERIFIED' -Message $summary
+        $items = @()
+        if ($createdByThisRun) {
+            $items += [pscustomobject][ordered]@{ Id = 'platinum-plan-created'; Name = "Create $(Get-POPlatinumPlanName) plan"; Status = 'APPLIED_VERIFIED'; Attempted = $true; Verified = $true; PreviousValue = 'Plan did not exist'; TargetValue = $planGuid; Reason = 'Created from the active Windows scheme and confirmed in powercfg /list.'; RequiresReboot = $false }
+        }
+        else {
+            $items += [pscustomobject][ordered]@{ Id = 'platinum-plan-reused'; Name = "Reuse $(Get-POPlatinumPlanName) plan"; Status = 'REUSED_VERIFIED'; Attempted = $false; Verified = $true; PreviousValue = $planGuid; TargetValue = $planGuid; Reason = 'Existing named scheme was queried and reused; no duplicate plan was created.'; RequiresReboot = $false }
+        }
+        $items += @($values.Changes)
+        if ($Activate) {
+            if ($activationChanged) {
+                $items += [pscustomobject][ordered]@{ Id = 'platinum-plan-activation'; Name = 'Activate Platinum On Steroids power plan'; Status = 'APPLIED_VERIFIED_ACTIVATED'; Attempted = $true; Verified = $true; PreviousValue = $activeBefore; TargetValue = $planGuid; Reason = 'powercfg setactive succeeded and Windows reported the requested active GUID.'; RequiresReboot = $false }
+            }
+            else {
+                $items += [pscustomobject][ordered]@{ Id = 'platinum-plan-activation'; Name = 'Activate Platinum On Steroids power plan'; Status = 'ALREADY_OPTIMIZED'; Attempted = $false; Verified = $true; PreviousValue = $planGuid; TargetValue = $planGuid; Reason = 'The Platinum plan was already active and Windows verified its GUID.'; RequiresReboot = $false }
+            }
+        }
+        $summary = "Preset $($preset.name): $($values.Applied.Count) settings changed and verified, $($values.AlreadyOptimized.Count) already at target, $($values.Skipped.Count) unsupported, $($values.Failed.Count) failed, $($values.Unverified.Count) unverified."
+        $ledgerWarning = $null
+        try {
+            $settingWriteLedger = ConvertTo-POPowerSettingWriteLedger -Changes @($values.Changes)
+            Update-POBackupChangeStatus -BackupPath $backup.Path -Section power -Status 'APPLIED_VERIFIED' -Message $summary -PowerSettingWrites @($settingWriteLedger)
+        }
+        catch { $ledgerWarning = $_.Exception.Message }
         Write-POLog -Category 'Power' -TweakId 'platinum-power-plan' -Status $(if ($activated) { 'APPLIED_VERIFIED_ACTIVATED' } else { 'APPLIED_VERIFIED' }) -Message $summary -Command "powercfg preset=$PresetId" -ExitCode 0
+        $finalMessage = $summary
+        if ($activated) { $finalMessage += " '$(Get-POPlatinumPlanName)' is the active plan." }
+        if ($ledgerWarning) { $finalMessage += " WARNING: backup ledger status update failed: $ledgerWarning" }
         return [pscustomobject][ordered]@{
             Status = if ($activated) { 'APPLIED_VERIFIED_ACTIVATED' } else { 'APPLIED_VERIFIED' }
-            Message = $summary + $(if ($activated) { " '$(Get-POPlatinumPlanName)' is now the active plan." } else { ' The previous plan remains active; use Activate when ready.' })
+            Message = $finalMessage
+            PlanName = Get-POPlatinumPlanName
             PlanGuid = $planGuid
+            PlanCreated = $createdByThisRun
             Activated = $activated
+            ActivationChanged = $activationChanged
+            Changes = $items
             Applied = $values.Applied
+            AlreadyOptimized = $values.AlreadyOptimized
             Skipped = $values.Skipped
+            Failed = $values.Failed
+            Unverified = $values.Unverified
             Backup = $backup
             RequiresReboot = $false
+            LedgerWarning = $ledgerWarning
         }
     }
     catch {
         $failure = $_.Exception.Message
+        $rollbackNotes = @()
+        $rollbackOk = $true
+        $currentActive = Get-POActivePowerPlanGuid
+        if ($currentActive -eq $planGuid -and $planGuid -ne $activeBefore) {
+            try { [void](Set-POActivePowerPlan -Guid ([guid]$activeBefore)); $currentActive = $activeBefore; $rollbackNotes += 'Restored the prior active plan and verified it.' }
+            catch { $rollbackOk = $false; $rollbackNotes += "Active-plan rollback failed: $($_.Exception.Message)" }
+        }
+        if ($existingBefore -and $settingsBefore) {
+            try {
+                $rollbackKeys = @()
+                if ($values -and $values.Changes) {
+                    $currentSettings = Get-POPlatinumPowerSettingsSnapshot -PlanGuid $planGuid
+                    foreach ($attemptedSetting in @($values.Changes | Where-Object { $_.Attempted })) {
+                        $idMatch = [regex]::Match([string]$attemptedSetting.Id, '^(?<id>.+)-(?<side>ac|dc)$', 'IgnoreCase')
+                        if (-not $idMatch.Success) { $rollbackOk = $false; $rollbackNotes += "Cannot identify the side for attempted setting '$($attemptedSetting.Id)'; it was not overwritten during rollback."; continue }
+                        $settingId = $idMatch.Groups['id'].Value
+                        $sideName = $idMatch.Groups['side'].Value.ToUpperInvariant()
+                        $valueName = if ($sideName -eq 'AC') { 'AcValue' } else { 'DcValue' }
+                        $capturedName = if ($sideName -eq 'AC') { 'AcCaptured' } else { 'DcCaptured' }
+                        $currentRecord = @($currentSettings.Settings | Where-Object { $_.Id -eq $settingId } | Select-Object -First 1)
+                        $beforeRecord = @($settingsBefore.Settings | Where-Object { $_.Id -eq $settingId } | Select-Object -First 1)
+                        if ($currentRecord.Count -eq 0 -or $beforeRecord.Count -eq 0 -or -not [bool]$currentRecord[0].$capturedName -or -not [bool]$beforeRecord[0].$capturedName) {
+                            $rollbackOk = $false
+                            $rollbackNotes += "The attempted setting '$settingId' ($sideName) could not be read for safe rollback."
+                            continue
+                        }
+                        $currentValue = 0; $beforeValue = 0; $previousValue = 0; $targetValue = 0
+                        if (-not [int]::TryParse([string]$currentRecord[0].$valueName, [ref]$currentValue) -or
+                            -not [int]::TryParse([string]$beforeRecord[0].$valueName, [ref]$beforeValue) -or
+                            -not [int]::TryParse([string]$attemptedSetting.PreviousValue, [ref]$previousValue) -or
+                            -not [int]::TryParse([string]$attemptedSetting.TargetValue, [ref]$targetValue) -or
+                            $previousValue -ne $beforeValue) {
+                            $rollbackOk = $false
+                            $rollbackNotes += "The attempted setting '$settingId' ($sideName) has invalid or inconsistent rollback values."
+                            continue
+                        }
+                        if ($currentValue -eq $beforeValue) { continue }
+                        if ($currentValue -ne $targetValue) {
+                            $rollbackOk = $false
+                            $rollbackNotes += "The attempted setting '$settingId' ($sideName) now has a newer value ($currentValue); it was left untouched."
+                            continue
+                        }
+                        $rollbackKeys += ($settingId + '|' + $sideName)
+                    }
+                }
+                if ($rollbackKeys.Count -gt 0) {
+                    $restoreSettings = Restore-POPlatinumPowerSettingsSnapshot -PlanGuid $planGuid -Snapshot $settingsBefore -SettingKeys @($rollbackKeys | Select-Object -Unique)
+                    if ($restoreSettings.Verified) { $rollbackNotes += 'Restored and verified only the existing Platinum settings attempted by this failed transaction.' }
+                    else { $rollbackOk = $false; $rollbackNotes += ('Existing plan settings rollback failed: ' + (@($restoreSettings.Failed) -join '; ')) }
+                }
+                elseif ($rollbackOk) { $rollbackNotes += 'No existing Platinum settings required rollback.' }
+            }
+            catch { $rollbackOk = $false; $rollbackNotes += "Existing plan settings rollback failed: $($_.Exception.Message)" }
+        }
+        elseif ($createdByThisRun) {
+            $currentActive = Get-POActivePowerPlanGuid
+            if ($currentActive -eq $activeBefore) {
+                $createdEntry = @(Get-POPowerPlans | Where-Object { $_.Guid -eq $planGuid -and $_.Name -eq (Get-POPlatinumPlanName) } | Select-Object -First 1)
+                if ($createdEntry.Count -gt 0) {
+                    $removeResult = Invoke-POPowercfg -Arguments @('/delete', $planGuid)
+                    if ($removeResult.ExitCode -eq 0 -and -not $removeResult.TimedOut -and @(Get-POPowerPlans | Where-Object { $_.Guid -eq $planGuid }).Count -eq 0) { $rollbackNotes += 'Removed only the new Platinum scheme created by this failed run.' }
+                    else { $rollbackOk = $false; $rollbackNotes += 'Could not verify removal of the newly created Platinum scheme; it was left installed.' }
+                }
+            }
+            else { $rollbackOk = $false; $rollbackNotes += "The active plan changed to '$currentActive'; the newly created plan was left untouched." }
+        }
+        try {
+            if ($null -ne $values) {
+                $settingWriteLedger = ConvertTo-POPowerSettingWriteLedger -Changes @($values.Changes)
+                Update-POBackupChangeStatus -BackupPath $backup.Path -Section power -Status 'FAILED' -Message $failure -PowerSettingWrites @($settingWriteLedger)
+            }
+            else { Update-POBackupChangeStatus -BackupPath $backup.Path -Section power -Status 'FAILED' -Message $failure }
+        }
+        catch { $rollbackNotes += "Backup ledger status update failed: $($_.Exception.Message)" }
         Write-POLog -Level 'ERROR' -Category 'Power' -TweakId 'platinum-power-plan' -Status 'FAILED' -Message $failure
-        try { Update-POBackupChangeStatus -BackupPath $backup.Path -Section power -Status 'FAILED' -Message $failure }
-        catch { Write-POLog -Level 'CRITICAL' -Category 'Backup' -Status 'TRANSACTION_STATUS_WRITE_FAILED' -Message $_.Exception.Message }
-        $stillActive = Get-POActivePowerPlanGuid
-        $rollbackNote = if ($stillActive -eq $activeBefore) { 'The previous plan is still active; nothing was switched.' } else { "WARNING: the active plan is now '$stillActive'; review manually." }
-        return [pscustomobject][ordered]@{ Status = 'FAILED'; Message = "$failure $rollbackNote"; PlanGuid = $planGuid; Activated = $false; Applied = @(); Skipped = @(); Rollback = $rollbackNote; Backup = $backup }
+        if (-not $rollbackOk) { Write-POLog -Level 'CRITICAL' -Category 'Power' -TweakId 'platinum-power-plan' -Status 'ROLLBACK_FAILED' -Message ($rollbackNotes -join ' ') }
+        $allChanges = @()
+        if ($values -and $values.Changes) {
+            foreach ($item in @($values.Changes)) {
+                if ($item.Status -eq 'APPLIED_VERIFIED') {
+                    $item.Status = if ($rollbackOk) { 'FAILED' } else { 'UNVERIFIED' }
+                    $item.Verified = $false
+                    $item.Reason = if ($rollbackOk) { 'The transaction failed; the pre-run state was restored and verified.' } else { 'The transaction failed and full rollback could not be verified.' }
+                }
+                $allChanges += $item
+            }
+        }
+        $allChanges += [pscustomobject][ordered]@{ Id = 'platinum-plan-workflow'; Name = 'Platinum power-plan workflow'; Status = if ($rollbackOk) { 'FAILED' } else { 'UNVERIFIED' }; Attempted = $true; Verified = $false; PreviousValue = $activeBefore; TargetValue = $planGuid; Reason = $failure + ' ' + ($rollbackNotes -join ' '); RequiresReboot = $false }
+        return [pscustomobject][ordered]@{
+            Status = 'FAILED'
+            Message = $failure + ' ' + ($rollbackNotes -join ' ')
+            PlanName = Get-POPlatinumPlanName
+            PlanGuid = $planGuid
+            PlanCreated = $createdByThisRun
+            Activated = $false
+            ActivationChanged = $activationChanged
+            Changes = $allChanges
+            Applied = @()
+            AlreadyOptimized = if ($values) { $values.AlreadyOptimized } else { @() }
+            Skipped = if ($values) { $values.Skipped } else { @() }
+            Failed = if ($values) { $values.Failed } else { @() }
+            Unverified = if ($values) { $values.Unverified } else { @() }
+            RollbackVerified = $rollbackOk
+            Rollback = $rollbackNotes
+            Backup = $backup
+            RequiresReboot = $false
+        }
     }
 }
 
@@ -608,7 +1054,8 @@ function Get-POCpuParkingStatus {
 
 Export-ModuleMember -Function @(
     'Get-POPowerSettingCatalog', 'Get-POPlatinumPlanName', 'Get-POPlatinumState', 'Get-POPlatinumStatePath',
-    'ConvertFrom-POPowerPlanListLines', 'ConvertFrom-POPowerQueryLines', 'Test-POPowerPresetDefinition',
+    'ConvertFrom-POPowerPlanListLines', 'ConvertFrom-POPowerQueryLines', 'ConvertFrom-POPowerSettingsSnapshot',
+    'Get-POPlatinumPowerSettingsSnapshot', 'Restore-POPlatinumPowerSettingsSnapshot', 'Test-POPowerPresetDefinition',
     'Get-POPlatinumPresetCatalog', 'Get-POPlatinumPlanInfo', 'New-POPlatinumPlan',
     'Invoke-POPlatinumPlanWorkflow', 'Set-POPlatinumPlanActive', 'Restore-POPreviousPowerPlan', 'Remove-POPlatinumPlan',
     'Get-POQuickCpuStatus', 'Get-POCpuParkingStatus'
