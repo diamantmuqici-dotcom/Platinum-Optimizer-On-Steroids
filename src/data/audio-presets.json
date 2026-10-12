@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "policy": "Audio changes stay optional and independent of the main gaming optimization. Only settings that can be read back and restored are changed programmatically; everything else is surfaced as verified detection plus manual steps in supported Windows UI. No paid codec, driver, or third-party audio software is installed. Audio latency is never claimed to be reduced because it is not measured.",
+  "supportedChanges": [
+    {
+      "id": "communications-ducking",
+      "name": "Windows communications activity behavior",
+      "hive": "CurrentUser",
+      "subKey": "Software\\Microsoft\\Multimedia\\Audio",
+      "valueName": "UserDuckingPreference",
+      "kind": "DWord",
+      "documentedValues": {
+        "0": "Mute all other sounds",
+        "1": "Reduce the volume of other sounds by 80% (Windows default)",
+        "2": "Reduce the volume of other sounds by 50%",
+        "3": "Do nothing"
+      },
+      "surface": "Control Panel > Sound > Communications tab (mmsys.cpl)",
+      "notes": "This is the only per-machine audio behavior the application changes automatically, because it is fully readable, verifiable, and restorable. The microphone is never disabled and default devices are never changed without the user doing it in the supported UI."
+    }
+  ],
+  "presets": [
+    {
+      "id": "competitive-fps",
+      "name": "Competitive FPS Audio",
+      "description": "A consistent, unprocessed mix for CS2, Fortnite, and Rust. Stops Windows from ducking game audio when voice chat is detected, and recommends disabling endpoint enhancements so positional cues are not re-processed.",
+      "whatChanges": ["Sets communications activity to 'Do nothing' so game volume stays constant while a microphone is active."],
+      "why": "Automatic ducking changes loudness mid-match, which makes positional cues inconsistent. Enhancements add processing that can smear directionality; whether stereo or virtual surround is better depends on the headset, game engine, and personal preference, so no universal winner is claimed.",
+      "changes": { "communications-ducking": 3 },
+      "manualSteps": [
+        "Sound (mmsys.cpl) > Playback > your headset > Properties > Advanced: uncheck 'Allow applications to take exclusive control' only if another app steals the device; exclusive mode can lower latency for some engines but breaks mixing for voice chat.",
+        "Sound > Playback > headset > Properties > Enhancements or Advanced: disable audio enhancements / signal processing if present.",
+        "CS2: enable the in-game HRTF headphone option; it is engine-native and replaces, not stacks with, Windows spatial processing.",
+        "Fortnite: set Audio > Quality to 'High' and enable the headphones output mode in-game.",
+        "Bluetooth headsets: hands-free mode drops quality; use a wired or USB connection for competitive play where possible."
+      ],
+      "restore": "Restore Original Audio Settings returns the captured communications behavior."
+    },
+    {
+      "id": "positional-audio",
+      "name": "Positional Audio",
+      "description": "Keeps the mix stable and helps you choose one spatial path without stacking two. No latency claim is made.",
+      "whatChanges": ["Sets communications activity to 'Do nothing'."],
+      "why": "Positional clarity suffers when Windows ducking and two different spatial processors (for example Windows Sonic plus a headset-suite virtualizer) run at once. Pick exactly one spatial path: game-native HRTF first, otherwise Windows Sonic or your headset's own virtualizer.",
+      "changes": { "communications-ducking": 3 },
+      "manualSteps": [
+        "Settings > System > Sound > your output device: set Spatial audio to 'Windows Sonic for Headphones' ONLY if the game has no native HRTF.",
+        "If the game has native HRTF (for example CS2), leave Windows spatial audio OFF to avoid double processing.",
+        "Dolby Atmos for Headphones and DTS Headphone:X are paid products; Platinum Optimizer does not install them. If you already own one, it may suit your headset better than Sonic — compare in-game, not in marketing text.",
+        "USB headsets: keep the manufacturer's EQ flat until you know the game's sound profile."
+      ],
+      "restore": "Restore Original Audio Settings returns the captured communications behavior."
+    },
+    {
+      "id": "stereo-headphones",
+      "name": "Stereo Headphones",
+      "description": "Plain two-channel output with no spatial post-processing. The most compatible configuration for music and games that have their own binaural rendering.",
+      "whatChanges": ["Sets communications activity to 'Do nothing'."],
+      "why": "Many game engines assume stereo endpoints when their own HRTF is enabled. Forcing virtual surround on top of engine HRTF doubles the processing and can blur positioning.",
+      "changes": { "communications-ducking": 3 },
+      "manualSteps": [
+        "Sound > Playback > headset > Properties > Spatial audio: Off.",
+        "Sound > Playback > headset > Properties > Advanced > Default Format: 16-bit or 24-bit, 48000 Hz is the most compatible choice for games; 44100 Hz is fine for music. One sample rate is not universally lower-latency than another — pick the format your headset driver lists.",
+        "Do not force unsupported sample rates; only choose rates Windows lists in the dropdown."
+      ],
+      "restore": "Restore Original Audio Settings returns the captured communications behavior."
+    },
+    {
+      "id": "surround-spatial",
+      "name": "Surround / Spatial Audio",
+      "description": "Enables a single spatial path through Windows for headsets, with guidance to avoid conflicts.",
+      "whatChanges": ["Sets communications activity to 'Do nothing'."],
+      "why": "Spatial audio can widen the soundstage on content that supports it. It is not automatically better than stereo for competitive shooters; preference and the specific headset matter.",
+      "changes": { "communications-ducking": 3 },
+      "manualSteps": [
+        "Settings > System > Sound > output device > Spatial audio: Windows Sonic for Headphones (free, built-in).",
+        "If you own Dolby Atmos for Headphones or DTS Headphone:X already, compare them against Sonic in the same game scene before deciding.",
+        "Do not enable Windows spatial audio AND a virtual 7.1 mode in your headset software at the same time.",
+        "Bluetooth A2DP bandwidth limits codec quality; spatial effects over Bluetooth SBC/AAC may sound worse than wired."
+      ],
+      "restore": "Restore Original Audio Settings returns the captured communications behavior."
+    },
+    {
+      "id": "music-general",
+      "name": "Music & General Use",
+      "description": "Returns Windows default behavior for general listening: standard ducking, no gaming-oriented changes.",
+      "whatChanges": ["Sets communications activity back to the Windows default 'Reduce by 80%'."],
+      "why": "For music and calls the default ducking is usually what users expect; this preset is the safe 'undo' for everyday use.",
+      "changes": { "communications-ducking": 1 },
+      "manualSteps": [
+        "Sound > Playback > speakers/headset > Properties > Advanced: pick the highest format the device lists if you listen to lossless audio; shared mode remains available to all apps.",
+        "Exclusive mode (allow applications to take exclusive control) is for bit-perfect playback tools; leave it enabled only if you use such tools."
+      ],
+      "restore": "Restore Original Audio Settings returns the captured communications behavior."
+    },
+    {
+      "id": "microphone-voice-chat",
+      "name": "Microphone & Voice Chat",
+      "description": "Stops Windows from ducking game and music audio while you talk, and shows where to verify the microphone chain. The microphone itself is never disabled or re-defaulted by the app.",
+      "whatChanges": ["Sets communications activity to 'Do nothing'."],
+      "why": "With ducking enabled, Windows treats every voice call as communications and lowers everything else — the most common complaint in Discord plus game setups.",
+      "changes": { "communications-ducking": 3 },
+      "manualSteps": [
+        "Sound (mmsys.cpl) > Recording: confirm your actual microphone is the Default Device and Default Communication Device if you want one device for both.",
+        "Discord/in-game voice: select the same input device explicitly instead of 'Default' to avoid device-switch glitches.",
+        "Sound > Recording > microphone > Properties > Advanced: 48000 Hz, 16-bit is the most compatible voice-chat format.",
+        "USB headsets: if the mic cuts out, disable USB selective suspend for that device in Device Manager power management (manual, reversible)."
+      ],
+      "restore": "Restore Original Audio Settings returns the captured communications behavior."
+    },
+    {
+      "id": "restore-original",
+      "name": "Restore Original Audio Settings",
+      "description": "Restores every value this module captured before applying a preset. If Platinum Optimizer did not change a value, nothing is written.",
+      "whatChanges": ["Writes back only the exact values recorded in the module's change manifest."],
+      "why": "Reliable rollback is a prerequisite for every optional audio change.",
+      "changes": {},
+      "manualSteps": [],
+      "restore": "This preset IS the restore operation."
+    }
+  ],
+  "manualSurfaces": {
+    "soundControlPanel": "rundll32.exe shell32.dll,Control_RunDLL mmsys.cpl,,0",
+    "windowsSoundSettings": "ms-settings:sound"
+  }
+}

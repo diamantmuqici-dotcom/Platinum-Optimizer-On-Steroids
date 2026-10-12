@@ -1424,7 +1424,12 @@ function Get-POFileInventory {
 
 function New-POBackup {
     [CmdletBinding()]
-    param([int]$NetworkInterfaceIndex = -1)
+    param(
+        [int]$NetworkInterfaceIndex = -1,
+        [AllowNull()][psobject]$PlatinumState = $null,
+        [AllowNull()][psobject]$AudioState = $null,
+        [AllowNull()][psobject]$DisplayState = $null
+    )
     if (-not (Test-POIsWindows)) { throw 'Backups can only be created on Windows.' }
     $root = Get-POBackupRoot
     if (-not (Test-Path -LiteralPath $root)) { New-Item -ItemType Directory -Path $root -Force | Out-Null }
@@ -1435,7 +1440,7 @@ function New-POBackup {
         $backupPath = Join-Path $root ('{0}_{1}' -f $id, $suffix)
         $suffix++
     }
-    foreach ($folder in @('registry', 'bcd', 'services', 'power', 'network', 'system')) {
+    foreach ($folder in @('registry', 'bcd', 'services', 'power', 'network', 'system', 'audio', 'display')) {
         New-Item -ItemType Directory -Path (Join-Path $backupPath $folder) -Force | Out-Null
     }
     $warnings = @()
@@ -1486,6 +1491,16 @@ function New-POBackup {
     $registryState = Get-PORegistrySnapshotKeys
     Write-POJsonAtomic -Path (Join-Path $backupPath 'registry\game-settings-before.json') -Object $registryState
 
+    if ($null -ne $PlatinumState) {
+        Write-POJsonAtomic -Path (Join-Path $backupPath 'power\platinum-state.json') -Object $PlatinumState
+    }
+    if ($null -ne $AudioState) {
+        Write-POJsonAtomic -Path (Join-Path $backupPath 'audio\audio-before.json') -Object $AudioState
+    }
+    if ($null -ne $DisplayState) {
+        Write-POJsonAtomic -Path (Join-Path $backupPath 'display\display-before.json') -Object $DisplayState
+    }
+
     $bcdStatus = 'Read-only BCD export; the optimizer does not modify boot settings.'
     try {
         $bcdText = @(& bcdedit.exe /enum '{current}' /v 2>&1) -join "`r`n"
@@ -1500,7 +1515,7 @@ function New-POBackup {
         id = Split-Path -Leaf $backupPath
         createdAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
         createdAtUtc = [DateTime]::UtcNow.ToString('o')
-        applicationVersion = '1.0.0'
+        applicationVersion = '1.1.0'
         status = 'VALID'
         modifiedSections = @()
         changes = @()
@@ -1627,7 +1642,7 @@ function Get-POBackups {
 function Add-POBackupChange {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$BackupPath,
-          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry')][string]$Section,
+          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display')][string]$Section,
           [Parameter(Mandatory = $true)][psobject]$Change)
     $manifestPath = Join-Path $BackupPath 'manifest.json'
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
@@ -1643,7 +1658,7 @@ function Add-POBackupChange {
 function Update-POBackupChangeStatus {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$BackupPath,
-          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry')][string]$Section,
+          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display')][string]$Section,
           [Parameter(Mandatory = $true)][string]$Status,
           [string]$Message = '',
           [AllowNull()][string[]]$AfterIPv4)
@@ -1686,7 +1701,37 @@ function Restore-POPowerPlan {
     $parsedGuid = [guid]::Empty
     if (-not [guid]::TryParse($guid, [ref]$parsedGuid)) { throw 'The backup contains an invalid active power-plan GUID.' }
     $change = @($Manifest.changes | Where-Object { $_.section -eq 'power' } | Select-Object -Last 1)
-    if ($change.Count -eq 0 -or $change[0].id -ne 'power-plan') { throw 'No supported power-plan change was recorded in this backup.' }
+    if ($change.Count -eq 0) { throw 'No supported power-plan change was recorded in this backup.' }
+    if ($change[0].id -eq 'platinum-power-plan') {
+        $platinumStatePath = Join-Path $BackupPath 'power\platinum-state.json'
+        if (-not (Test-Path -LiteralPath $platinumStatePath -PathType Leaf)) { throw 'The backup does not contain the Platinum On Steroids state file.' }
+        $platinumState = Get-Content -LiteralPath $platinumStatePath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+        $originalGuid = [string]$platinumState.OriginalActivePlanGuid
+        if ([string]::IsNullOrWhiteSpace($originalGuid)) { throw 'The Platinum plan state does not record the original active plan.' }
+        $parsedOriginal = [guid]::Empty
+        if (-not [guid]::TryParse($originalGuid, [ref]$parsedOriginal)) { throw 'The Platinum plan state contains an invalid original plan GUID.' }
+        if ([string]$change[0].fromGuid -ne $parsedOriginal.ToString()) { throw 'The transaction ledger and Platinum state file disagree about the original plan.' }
+        $currentActive = Get-POActivePowerPlanGuid
+        if ([string]::IsNullOrWhiteSpace($currentActive)) { throw 'The current active power plan could not be read; restore was blocked.' }
+        if ($currentActive -eq $parsedOriginal.ToString()) { return }
+        $platinumGuidText = if ($platinumState.PSObject.Properties['PlatinumPlanGuid']) { [string]$platinumState.PlatinumPlanGuid } else { [string]$change[0].toGuid }
+        if ($currentActive -ne $platinumGuidText.ToLowerInvariant() -and $currentActive -ne $platinumGuidText) {
+            throw 'The active power plan changed after Platinum Optimizer applied the Platinum plan; refusing to overwrite that newer user choice.'
+        }
+        $available = @(Get-POPowerPlans | Where-Object { $_.Guid -eq $parsedOriginal.ToString() })
+        if ($available.Count -eq 0 -and $state.ExportFile) {
+            $exportRelative = [string]$state.ExportFile
+            if ($exportRelative -ne 'power\active-plan.pow' -and $exportRelative -ne 'power/active-plan.pow') { throw 'The backup contains an invalid power-plan export path.' }
+            $export = Join-Path $BackupPath $exportRelative
+            if (Test-Path -LiteralPath $export -PathType Leaf) {
+                & powercfg.exe /import $export $parsedOriginal.ToString() 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "Power-plan restore import failed with exit code $LASTEXITCODE." }
+            }
+        }
+        [void](Set-POActivePowerPlan -Guid $parsedOriginal)
+        return
+    }
+    if ($change[0].id -ne 'power-plan') { throw 'No supported power-plan change was recorded in this backup.' }
     if ([string]$change[0].fromGuid -ne $guid) { throw 'The transaction ledger and saved original power-plan GUID do not match.' }
     $targetGuid = [guid]::Empty
     if (-not [guid]::TryParse([string]$change[0].toGuid, [ref]$targetGuid)) { throw 'The recorded target power-plan GUID is invalid.' }
@@ -1779,7 +1824,7 @@ function Restore-POBackup {
     $validation = Test-POBackup -Path $fullPath
     if (-not $validation.Valid) { throw ('Backup validation failed: ' + (@($validation.Issues) -join '; ')) }
     $manifest = $validation.Manifest
-    $allowedSections = @('power', 'network', 'registry')
+    $allowedSections = @('power', 'network', 'registry', 'audio', 'display')
     $sections = @($manifest.modifiedSections | Select-Object -Unique)
     $unknownSections = @($sections | Where-Object { $_ -notin $allowedSections })
     if ($unknownSections.Count -gt 0) { throw ('Backup contains unsupported restore sections: ' + ($unknownSections -join ', ')) }
@@ -1796,7 +1841,8 @@ function Restore-POBackup {
     if (-not $PSCmdlet.ShouldProcess($manifest.id, 'Restore recorded Platinum Optimizer changes')) {
         return [pscustomobject]@{ Status = 'SIMULATED'; Message = 'Restore was not executed.'; Restored = @() }
     }
-    if (-not (Test-POIsAdministrator)) { throw 'Restoring system settings requires an elevated Administrator session.' }
+    $systemSections = @($sections | Where-Object { $_ -in @('power', 'network', 'registry') })
+    if ($systemSections.Count -gt 0 -and -not (Test-POIsAdministrator)) { throw 'Restoring system settings requires an elevated Administrator session.' }
     $restored = @(); $failures = @()
     foreach ($section in $sections) {
         try {
@@ -1804,6 +1850,14 @@ function Restore-POBackup {
                 'power' { Restore-POPowerPlan -BackupPath $fullPath -Manifest $manifest }
                 'network' { Restore-PONetworkDns -BackupPath $fullPath -Manifest $manifest }
                 'registry' { Restore-PORegistryChanges -BackupPath $fullPath -Manifest $manifest }
+                'audio' {
+                    if (-not (Get-Command Restore-POAudioSection -ErrorAction SilentlyContinue)) { throw 'The Audio module is not loaded; the audio section cannot be restored in this session.' }
+                    Restore-POAudioSection -BackupPath $fullPath -Manifest $manifest
+                }
+                'display' {
+                    if (-not (Get-Command Restore-PODisplaySection -ErrorAction SilentlyContinue)) { throw 'The Display module is not loaded; the display section cannot be restored in this session.' }
+                    Restore-PODisplaySection -BackupPath $fullPath -Manifest $manifest
+                }
                 default { throw "No restore handler exists for changed section '$section'; no further sections were attempted." }
             }
             $restored += $section
@@ -2203,9 +2257,10 @@ function Remove-POBackup {
 }
 
 Export-ModuleMember -Function @(
-    'Get-POStateRoot', 'Get-POProfileCatalog', 'Get-POTweakCatalog', 'Get-POGameCatalog', 'Get-POServiceCatalog',
+    'Get-POStateRoot', 'Get-POJsonFile', 'Get-POProfileCatalog', 'Get-POTweakCatalog', 'Get-POGameCatalog', 'Get-POServiceCatalog',
     'Test-POIsWindows', 'Test-POIsAdministrator', 'Get-POSystemSnapshot', 'Get-POStatusSnapshot', 'Get-POPowerPlans',
-    'Get-PORegValueState', 'Test-POIPv4DnsAddresses',
+    'Get-PORegValueState', 'Set-PORegValueState', 'Test-POIPv4DnsAddresses',
+    'Write-POJsonAtomic', 'Add-POBackupChange', 'Update-POBackupChangeStatus', 'Set-POActivePowerPlan',
     'Get-POActivePowerPlanGuid', 'Get-POBuiltinPlanGuid', 'Get-POProfiles', 'Get-POTweakCompatibility', 'New-POProfilePlan',
     'Get-PONetworkAdapters', 'Get-POCurrentAdapterDns', 'Test-POAdapterDnsEligibility', 'Invoke-PONetworkPingTest', 'Get-POServiceAudit', 'Get-POBcdAudit',
     'Get-POStartupAudit', 'Get-PODriverInventory', 'Get-POScheduledTaskAudit', 'Get-POAppxInventory', 'Get-POInstalledGames', 'Add-POCustomGame', 'Get-POBenchmarkSnapshot',

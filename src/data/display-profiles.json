@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "policy": "Display tuning never fabricates capability. Only documented Win32 interfaces are used (EnumDisplayDevices, EnumDisplaySettings, ChangeDisplaySettingsEx, Get/SetDeviceGammaRamp, dxva2 physical monitor queries). GPU-vendor saturation controls (Digital Vibrance, AMD Saturation, Intel color) are not writable through documented APIs here, so they are offered as manual instructions only. Gamma ramps are applied ABSOLUTELY from a captured original, never relative to the current ramp, so repeated applies cannot accumulate into a green or oversaturated image. No GPU registry value is ever written.",
+  "safety": {
+    "gammaMin": 0.85,
+    "gammaMax": 1.15,
+    "defaultVibranceGuidance": "Vendor saturation controls default to 50 percent on NVIDIA Digital Vibrance. Raise it in small steps (5 percent) if you choose; never start at maximum.",
+    "neverWriteGpuRegistry": true,
+    "singleDisplayTargeting": true,
+    "restoreBeforeAccumulate": true
+  },
+  "profiles": [
+    {
+      "id": "platinum-competitive",
+      "name": "Platinum Competitive",
+      "purpose": "A conservative visibility lift for competitive play: a small, bounded gamma lift and optional highest-available refresh on the SELECTED display only.",
+      "scope": "Selected display only. Changes the GPU output gamma ramp for that display; it is not per-game and affects the whole desktop until restored.",
+      "gamma": 1.08,
+      "refresh": "highest-at-current-resolution",
+      "hdr": "leave-unchanged",
+      "vibranceGuidance": "Optional, manual only: NVIDIA Control Panel > Digital Vibrance or AMD Display > Saturation. Increase by 5-10 percent at most; verify skin tones and map colors before keeping it.",
+      "tradeoffs": ["A gamma lift reduces shadow depth; colors are slightly washed out versus the calibrated state.", "Refresh change may reset some fullscreen game modes once."]
+    },
+    {
+      "id": "cs2-visibility",
+      "name": "CS2 Visibility",
+      "purpose": "Brighten dark corners modestly for Counter-Strike 2 without crushing highlights.",
+      "scope": "Selected display gamma ramp. Global for the desktop while active. CS2 itself has no brightness API that external tools may touch; in-game Brightness/Contrast remain the per-game control.",
+      "gamma": 1.1,
+      "refresh": "highest-at-current-resolution",
+      "hdr": "leave-unchanged",
+      "vibranceGuidance": "CS2 pros often raise Digital Vibrance 10-20 percent manually. Do it in the NVIDIA/AMD control panel, not here; start low and compare wall and skin colors.",
+      "tradeoffs": ["Higher gamma flattens dark gradients.", "If CS2 runs exclusive fullscreen it may bypass the desktop gamma ramp; test in the actual mode you play."]
+    },
+    {
+      "id": "fortnite-visibility",
+      "name": "Fortnite Visibility",
+      "purpose": "Slight gamma lift for Fortnite's already bright art style; useful mainly in Performance mode where shadows are minimal.",
+      "scope": "Selected display gamma ramp, global for the desktop while active.",
+      "gamma": 1.06,
+      "refresh": "highest-at-current-resolution",
+      "hdr": "leave-unchanged",
+      "vibranceGuidance": "Fortnite colors are already saturated; raising vendor saturation usually oversaturates. Consider leaving it at default.",
+      "tradeoffs": ["Fortnite DX12 mode with Lumen ignores simple gamma expectations; compare in a real match, not the lobby."]
+    },
+    {
+      "id": "rust-visibility",
+      "name": "Rust Visibility",
+      "purpose": "Modest lift for Rust's dark interiors and night cycle.",
+      "scope": "Selected display gamma ramp, global for the desktop while active.",
+      "gamma": 1.12,
+      "refresh": "keep",
+      "hdr": "leave-unchanged",
+      "vibranceGuidance": "Manual only, small steps. Rust night scenes clip quickly if gamma and saturation are both raised.",
+      "tradeoffs": ["Daylight scenes will look washed out while the profile is active; restore when finished."]
+    },
+    {
+      "id": "natural",
+      "name": "Natural Colors",
+      "purpose": "Return the selected display to a neutral ramp (identity gamma) while keeping the captured original restorable.",
+      "scope": "Selected display gamma ramp.",
+      "gamma": 1.0,
+      "refresh": "keep",
+      "hdr": "leave-unchanged",
+      "vibranceGuidance": "If you previously raised vendor saturation, reset it to default in the GPU control panel.",
+      "tradeoffs": ["None; identity ramp is what Windows starts with."]
+    },
+    {
+      "id": "movie-media",
+      "name": "Movie & Media",
+      "purpose": "Slightly deeper contrast curve for film playback.",
+      "scope": "Selected display gamma ramp.",
+      "gamma": 0.95,
+      "refresh": "keep",
+      "hdr": "leave-unchanged",
+      "vibranceGuidance": "Leave saturation at default; media players and video drivers apply their own color processing.",
+      "tradeoffs": ["Shadow detail is slightly reduced."]
+    },
+    {
+      "id": "hdr-gaming",
+      "name": "HDR Gaming",
+      "purpose": "Does NOT write any HDR setting. It checks what can be detected and opens Windows HDR settings, because HDR enablement and tone mapping are user-facing and panel-dependent.",
+      "scope": "Guidance only plus a shortcut to Settings > Display > HDR.",
+      "gamma": null,
+      "refresh": "keep",
+      "hdr": "open-settings",
+      "vibranceGuidance": "Under HDR, desktop gamma ramps are typically ignored; vendor saturation controls may behave differently. Do not combine a gamma profile with HDR and judge the result from SDR screenshots.",
+      "tradeoffs": ["HDR appearance depends on panel peak brightness; on low-brightness panels SDR may look better."]
+    },
+    {
+      "id": "color-accurate",
+      "name": "Color-Accurate / Creator",
+      "purpose": "Identity ramp, no refresh change, and guidance to use Windows Color Management (ICC profile) instead of GPU tweaks.",
+      "scope": "Selected display gamma ramp set to identity.",
+      "gamma": 1.0,
+      "refresh": "keep",
+      "hdr": "leave-unchanged",
+      "vibranceGuidance": "Reset any vendor saturation to default. Load your monitor's ICC profile via colorcpl.exe if the manufacturer provides one.",
+      "tradeoffs": ["Games may look less punchy than with saturation boosts."]
+    },
+    {
+      "id": "restore-display",
+      "name": "Restore Previous Display Configuration",
+      "purpose": "Restores the resolution, refresh rate, and gamma ramp captured before the first Platinum display change on the selected display.",
+      "scope": "Selected display only.",
+      "gamma": "restore-captured",
+      "refresh": "restore-captured",
+      "hdr": "leave-unchanged",
+      "vibranceGuidance": "Vendor saturation changes made manually in the GPU control panel must be reverted there; Platinum Optimizer never wrote them.",
+      "tradeoffs": ["None."]
+    }
+  ],
+  "manualSurfaces": {
+    "windowsDisplaySettings": "ms-settings:display",
+    "windowsHdrSettings": "ms-settings:display",
+    "colorManagement": "colorcpl.exe",
+    "advancedDisplay": "ms-settings:display-advanced"
+  },
+  "gameNotes": {
+    "cs2": "CS2 offers in-game Brightness, Contrast, and an HRTF audio option. Global Windows/GPU color changes cannot be limited to CS2 alone; the selected technology here (desktop gamma ramp) is global by nature.",
+    "fortnite": "Fortnite has no external color API; use in-game Brightness and Display Mode. Global ramp changes affect the desktop, not just Fortnite.",
+    "rust": "Rust has an in-game brightness slider; global ramp changes are not per-game. No game memory or anti-cheat interaction is performed."
+  }
+}

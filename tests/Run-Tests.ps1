@@ -5,7 +5,10 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $modulePath = Join-Path $repoRoot 'src\core\PlatinumOptimizer.Core.psm1'
-Import-Module -Name $modulePath -Force -ErrorAction Stop
+Import-Module -Name $modulePath -Global -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Power.psm1') -Global -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Audio.psm1') -Global -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Display.psm1') -Global -Force -ErrorAction Stop
 $script:CoreModule = @(Get-Module | Where-Object { $_.Path -eq $modulePath } | Select-Object -First 1)[0]
 
 $script:Passed = 0
@@ -303,6 +306,206 @@ try {
 }
 catch {
     Assert-POTest $false 'Backup/dry-run/registry tests' $_.Exception.Message
+}
+
+# Platinum On Steroids extension tests: power presets, audio presets,
+# display profiles, pure parsers, and the single-file release structure.
+# These are pure logic/structure tests and run on any host.
+try {
+    $powerCatalog = Get-Content -LiteralPath (Join-Path $repoRoot 'src\data\power-settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-POTest ($powerCatalog.planName -eq 'Platinum On Steroids') 'Power catalog defines the exact Platinum On Steroids plan name'
+    $guidPattern = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    $allGuids = @($powerCatalog.builtinSchemes.PSObject.Properties | ForEach-Object { [string]$_.Value })
+    $allGuids += @($powerCatalog.subgroups.PSObject.Properties | ForEach-Object { [string]$_.Value })
+    foreach ($setting in @($powerCatalog.settings)) {
+        $allGuids += [string]$setting.guid
+        if ($setting.PSObject.Properties['dcGuid'] -and $setting.dcGuid) { $allGuids += [string]$setting.dcGuid }
+    }
+    $badGuids = @($allGuids | Where-Object { $_ -notmatch $guidPattern })
+    Assert-POTest ($badGuids.Count -eq 0) 'Power catalog uses only well-formed documented GUID strings' ($badGuids -join ', ')
+    $presetIds = @($powerCatalog.presets | ForEach-Object { [string]$_.id })
+    foreach ($requiredPreset in @('gaming', 'competitive', 'balanced', 'laptop')) {
+        Assert-POTest ($presetIds -contains $requiredPreset) "Power preset exists: $requiredPreset"
+    }
+    $settingIds = @($powerCatalog.settings | ForEach-Object { [string]$_.id })
+    $presetValidationIssues = @()
+    foreach ($preset in @($powerCatalog.presets)) {
+        $check = Test-POPowerPresetDefinition -Preset $preset -Catalog $powerCatalog
+        if (-not $check.Valid) { $presetValidationIssues += $check.Issues }
+        foreach ($sideName in @('ac', 'dc')) {
+            $side = $preset.PSObject.Properties[$sideName]
+            if ($null -eq $side -or $null -eq $side.Value) { continue }
+            foreach ($property in $side.Value.PSObject.Properties) {
+                if ($property.Name -notin $settingIds) { $presetValidationIssues += "$($preset.id).$sideName.$($property.Name) is not in the settings catalog" }
+            }
+        }
+    }
+    Assert-POTest ($presetValidationIssues.Count -eq 0) 'All power presets reference only documented settings inside documented ranges' ($presetValidationIssues -join '; ')
+    $competitivePreset = @($powerCatalog.presets | Where-Object { $_.id -eq 'competitive' } | Select-Object -First 1)[0]
+    Assert-POTest ([bool]$competitivePreset.requiresThermalConfirmation) 'Competitive preset requires a separate thermal/power confirmation'
+
+    $listSample = @(
+        'Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced) *',
+        'Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)',
+        'Power Scheme GUID: E9A42B02-D5DF-448D-AA00-03F14749EB61  (Ultimate Performance)'
+    )
+    $parsedList = @(ConvertFrom-POPowerPlanListLines -Lines $listSample)
+    Assert-POTest ($parsedList.Count -eq 3) 'powercfg /list parser finds every plan line'
+    $activeParsed = @($parsedList | Where-Object { $_.IsActive })
+    Assert-POTest ($activeParsed.Count -eq 1 -and $activeParsed[0].Guid -eq '381b4222-f694-41f0-9685-ff5bb260df2e') 'powercfg /list parser marks only the starred plan active'
+
+    $querySample = @(
+        'Power Scheme GUID: 11111111-2222-3333-4444-555555555555  (Platinum On Steroids)',
+        '',
+        'Subgroup GUID: 54533251-82be-4824-96c1-47b60b740d00  (Processor performance)',
+        'GUID Alias: SUB_PROCESSOR',
+        'Power Setting GUID: 893dee8e-2bef-41e0-89c6-b55d0929964c  (Minimum processor state)',
+        'GUID Alias: PROCFLOOR',
+        'Current AC Power Setting Index: 0x00000064',
+        'Current DC Power Setting Index: 0x00000005',
+        'Power Setting GUID: ea062031-0e34-4ff1-9b6d-eb1059334028',
+        'Current AC Power Setting Index: 0x00000064'
+    )
+    $parsedQuery = @(ConvertFrom-POPowerQueryLines -Lines $querySample)
+    Assert-POTest ($parsedQuery.Count -eq 2) 'powercfg /qh parser extracts setting records'
+    $minState = @($parsedQuery | Where-Object { $_.SettingGuid -eq '893dee8e-2bef-41e0-89c6-b55d0929964c' } | Select-Object -First 1)[0]
+    Assert-POTest ($minState.AcIndex -eq 100 -and $minState.DcIndex -eq 5) 'powercfg /qh parser decodes hex AC/DC indices'
+    Assert-POTest ($minState.SubgroupGuid -eq '54533251-82be-4824-96c1-47b60b740d00') 'powercfg /qh parser tracks the owning subgroup'
+}
+catch {
+    Assert-POTest $false 'Power module tests' $_.Exception.Message
+}
+
+try {
+    $audioCatalog = Get-Content -LiteralPath (Join-Path $repoRoot 'src\data\audio-presets.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $audioPresetIds = @($audioCatalog.presets | ForEach-Object { [string]$_.id })
+    foreach ($requiredAudio in @('competitive-fps', 'positional-audio', 'stereo-headphones', 'surround-spatial', 'music-general', 'microphone-voice-chat', 'restore-original')) {
+        Assert-POTest ($audioPresetIds -contains $requiredAudio) "Audio preset exists: $requiredAudio"
+    }
+    $supportedIds = @($audioCatalog.supportedChanges | ForEach-Object { [string]$_.id })
+    Assert-POTest ($supportedIds -contains 'communications-ducking') 'Audio catalog documents its supported automatic change'
+    $duckingDefinition = @($audioCatalog.supportedChanges | Where-Object { $_.id -eq 'communications-ducking' } | Select-Object -First 1)[0]
+    $duckingValues = @($duckingDefinition.documentedValues.PSObject.Properties | ForEach-Object { [int]$_.Name })
+    $audioPresetIssues = @()
+    foreach ($preset in @($audioCatalog.presets)) {
+        $changes = $preset.PSObject.Properties['changes']
+        if ($null -eq $changes -or $null -eq $changes.Value) { continue }
+        foreach ($change in $changes.Value.PSObject.Properties) {
+            if ($change.Name -notin $supportedIds) { $audioPresetIssues += "$($preset.id) references unsupported automatic change $($change.Name)"; continue }
+            if ($change.Name -eq 'communications-ducking' -and [int]$change.Value -notin $duckingValues) { $audioPresetIssues += "$($preset.id) requests undocumented ducking value $($change.Value)" }
+        }
+        if (@($preset.whatChanges).Count -eq 0) { $audioPresetIssues += "$($preset.id) does not explain what it changes" }
+    }
+    Assert-POTest ($audioPresetIssues.Count -eq 0) 'Audio presets only touch documented values and explain themselves' ($audioPresetIssues -join '; ')
+    Assert-POTest (ConvertTo-POAudioConnectionType -DeviceId 'USB\VID_046D&PID_0A5C' -ServiceOrClass $null -match 'USB') 'Audio connection inference recognises USB devices'
+    Assert-POTest (ConvertTo-POAudioConnectionType -DeviceId 'BTHENUM\Dev_abc' -ServiceOrClass $null -match 'Bluetooth') 'Audio connection inference recognises Bluetooth devices'
+    Assert-POTest (ConvertTo-POAudioConnectionType -DeviceId 'HDAUDIO\FUNC_01&VEN_10EC' -ServiceOrClass $null -match '3.5 mm|Analog') 'Audio connection inference maps HDAudio to analog'
+    Assert-POTest (ConvertTo-POAudioConnectionType -DeviceId 'PCI\VEN_8086' -ServiceOrClass $null -match 'Unknown') 'Audio connection inference never fabricates an unknown type'
+}
+catch {
+    Assert-POTest $false 'Audio module tests' $_.Exception.Message
+}
+
+try {
+    $displayCatalog = Get-Content -LiteralPath (Join-Path $repoRoot 'src\data\display-profiles.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $displayProfileIds = @($displayCatalog.profiles | ForEach-Object { [string]$_.id })
+    foreach ($requiredDisplay in @('platinum-competitive', 'cs2-visibility', 'fortnite-visibility', 'rust-visibility', 'natural', 'movie-media', 'hdr-gaming', 'color-accurate', 'restore-display')) {
+        Assert-POTest ($displayProfileIds -contains $requiredDisplay) "Display profile exists: $requiredDisplay"
+    }
+    $gammaMin = [double]$displayCatalog.safety.gammaMin
+    $gammaMax = [double]$displayCatalog.safety.gammaMax
+    Assert-POTest ($gammaMin -ge 0.85 -and $gammaMax -le 1.15) 'Display gamma safety bounds stay conservative'
+    $displayIssues = @()
+    foreach ($profile in @($displayCatalog.profiles)) {
+        $gammaProperty = $profile.PSObject.Properties['gamma']
+        if ($null -eq $gammaProperty -or $null -eq $gammaProperty.Value) { continue }
+        $gammaText = [string]$gammaProperty.Value
+        if ($gammaText -eq 'restore-captured') { continue }
+        $gammaValue = [double]$gammaText
+        if ($gammaValue -lt $gammaMin -or $gammaValue -gt $gammaMax) { $displayIssues += "$($profile.id) gamma $gammaValue is outside safety bounds" }
+    }
+    Assert-POTest ($displayIssues.Count -eq 0) 'Every display profile gamma stays inside the safety bounds' ($displayIssues -join '; ')
+    Assert-POTest ([bool]$displayCatalog.safety.neverWriteGpuRegistry) 'Display catalog declares that GPU registry values are never written'
+
+    $identity = Compute-POGammaRamp -Gamma 1.0
+    Assert-POTest ([int]$identity.Red[0] -eq 0 -and [int]$identity.Red[255] -eq 65535) 'Gamma ramp at 1.0 starts at 0 and ends at 65535'
+    $identityMid = [int]$identity.Red[128]
+    Assert-POTest ([math]::Abs($identityMid - 32896) -le 256) 'Gamma ramp at 1.0 is (close to) the identity curve'
+    $channelsIdentical = $true
+    for ($i = 0; $i -lt 256; $i++) {
+        if ([int]$identity.Red[$i] -ne [int]$identity.Green[$i] -or [int]$identity.Red[$i] -ne [int]$identity.Blue[$i]) { $channelsIdentical = $false; break }
+    }
+    Assert-POTest $channelsIdentical 'Gamma ramp is identical on all three channels (no tint / no green-shift path)'
+    $clamped = Compute-POGammaRamp -Gamma 5.0
+    Assert-POTest ([double]$clamped.Gamma -le $gammaMax) 'Gamma input is clamped to the documented safety maximum'
+    $first = Compute-POGammaRamp -Gamma 1.08
+    $second = Compute-POGammaRamp -Gamma 1.08
+    Assert-POTest ((ConvertTo-Json $first.Red -Compress) -eq (ConvertTo-Json $second.Red -Compress)) 'Gamma ramps are absolute: recomputing a profile never accumulates'
+    $monotonic = $true
+    for ($i = 1; $i -lt 256; $i++) { if ([int]$first.Red[$i] -lt [int]$first.Red[$i - 1]) { $monotonic = $false; break } }
+    Assert-POTest $monotonic 'Gamma ramp stays monotonic (no banding/inversion path)'
+
+    $modes = @(
+        [pscustomobject]@{ Width = 1920; Height = 1080; Bpp = 32; Frequency = 60 },
+        [pscustomobject]@{ Width = 1920; Height = 1080; Bpp = 32; Frequency = 144 },
+        [pscustomobject]@{ Width = 1920; Height = 1080; Bpp = 32; Frequency = 165 },
+        [pscustomobject]@{ Width = 2560; Height = 1440; Bpp = 32; Frequency = 240 }
+    )
+    $best = Select-POHighestRefresh -Modes $modes -Width 1920 -Height 1080 -CurrentFrequency 60
+    Assert-POTest ($null -ne $best -and [int]$best.Frequency -eq 165) 'Refresh selector picks the highest Hz at the current resolution'
+    $noUpgrade = Select-POHighestRefresh -Modes $modes -Width 1920 -Height 1080 -CurrentFrequency 165
+    Assert-POTest ($null -eq $noUpgrade) 'Refresh selector proposes no change when already at the highest Hz'
+}
+catch {
+    Assert-POTest $false 'Display module tests' $_.Exception.Message
+}
+
+try {
+    # Change ledger accepts the new audio/display sections.
+    $ledgerRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('PlatinumOptimizerLedger_' + [guid]::NewGuid().ToString('N'))
+    $ledgerBackup = Join-Path $ledgerRoot 'ledger-backup'
+    New-Item -ItemType Directory -Path $ledgerBackup -Force | Out-Null
+    $ledgerManifest = [pscustomobject][ordered]@{
+        schemaVersion = 1; id = 'ledger-backup'; status = 'VALID'; modifiedSections = @(); changes = @(); restoreHistory = @(); files = @()
+    }
+    Set-Content -LiteralPath (Join-Path $ledgerBackup 'manifest.json') -Value ($ledgerManifest | ConvertTo-Json -Depth 6) -Encoding UTF8
+    Add-POBackupChange -BackupPath $ledgerBackup -Section audio -Change ([pscustomobject][ordered]@{ section = 'audio'; id = 'audio-preset'; status = 'APPLYING' })
+    Add-POBackupChange -BackupPath $ledgerBackup -Section display -Change ([pscustomobject][ordered]@{ section = 'display'; id = 'display-profile'; status = 'APPLYING' })
+    Update-POBackupChangeStatus -BackupPath $ledgerBackup -Section audio -Status 'APPLIED_VERIFIED' -Message 'test'
+    $ledgerAfter = Get-Content -LiteralPath (Join-Path $ledgerBackup 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-POTest (@($ledgerAfter.modifiedSections) -contains 'audio' -and @($ledgerAfter.modifiedSections) -contains 'display') 'Backup ledger accepts audio and display sections'
+    $audioChangeAfter = @($ledgerAfter.changes | Where-Object { $_.section -eq 'audio' } | Select-Object -First 1)
+    Assert-POTest ($audioChangeAfter.Count -gt 0 -and $audioChangeAfter[0].status -eq 'APPLIED_VERIFIED') 'Audio change status is updated in the ledger'
+    Remove-Item -LiteralPath $ledgerRoot -Recurse -Force
+}
+catch {
+    Assert-POTest $false 'Ledger extension tests' $_.Exception.Message
+}
+
+try {
+    # Single-file release structure: the BAT must be a polyglot whose embedded
+    # payload is a byte-exact copy of the repository sources.
+    $batPath = Join-Path $repoRoot 'PlatinumOptimizer.bat'
+    Assert-POTest (Test-Path -LiteralPath $batPath -PathType Leaf) 'Single-file release PlatinumOptimizer.bat exists'
+    $batText = [System.IO.File]::ReadAllText($batPath, [System.Text.Encoding]::UTF8)
+    $markerCount = ([regex]::Matches($batText, [regex]::Escape('#>PO_PAYLOAD'))).Count
+    Assert-POTest ($markerCount -eq 1) 'Release file contains exactly one payload marker'
+    $batchSection = $batText.Split('#>PO_PAYLOAD')[0]
+    $nonAscii = @([char[]]$batchSection.ToCharArray() | Where-Object { [int]$_ -gt 127 })
+    Assert-POTest ($nonAscii.Count -eq 0) 'Release batch section is pure ASCII (any cmd code page can parse it)'
+    Assert-POTest ($batchSection -match '(?i)powershell\.exe .*-ExecutionPolicy Bypass .*-STA') 'Release launcher uses Bypass + STA Windows PowerShell'
+    Assert-POTest ($batchSection -match '(?i)where powershell\.exe') 'Release launcher fails clearly when PowerShell is missing'
+    foreach ($relative in @('src\PlatinumOptimizer.ps1', 'src\core\PlatinumOptimizer.Core.psm1', 'src\core\PlatinumOptimizer.Power.psm1', 'src\core\PlatinumOptimizer.Audio.psm1', 'src\core\PlatinumOptimizer.Display.psm1', 'src\ui\MainWindow.xaml', 'tests\Run-Tests.ps1')) {
+        $sourcePath = Join-Path $repoRoot $relative
+        $expectedB64 = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($sourcePath))
+        Assert-POTest ($batText.Contains("Expand-POEmbeddedFile -RelativePath '$relative' -EncodedContent '$expectedB64'")) "Release embeds $relative byte-exact"
+    }
+    Assert-POTest ($batText.Contains('src\data\power-settings.json')) 'Release embeds the Platinum power preset catalog'
+    Assert-POTest ($batText.Contains('src\data\audio-presets.json')) 'Release embeds the audio preset catalog'
+    Assert-POTest ($batText.Contains('src\data\display-profiles.json')) 'Release embeds the display profile catalog'
+}
+catch {
+    Assert-POTest $false 'Single-file release tests' $_.Exception.Message
 }
 
 Write-Host ''

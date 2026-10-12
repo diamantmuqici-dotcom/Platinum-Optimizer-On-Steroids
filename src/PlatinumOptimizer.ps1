@@ -8,7 +8,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $script:EntryScriptPath = $PSCommandPath
 $modulePath = Join-Path $PSScriptRoot 'core\PlatinumOptimizer.Core.psm1'
-Import-Module -Name $modulePath -Force -ErrorAction Stop
+Import-Module -Name $modulePath -Global -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $PSScriptRoot 'core\PlatinumOptimizer.Power.psm1') -Global -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $PSScriptRoot 'core\PlatinumOptimizer.Audio.psm1') -Global -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $PSScriptRoot 'core\PlatinumOptimizer.Display.psm1') -Global -Force -ErrorAction Stop
 
 if ($SelfTest) {
     & (Join-Path (Split-Path -Parent $PSScriptRoot) 'tests\Run-Tests.ps1')
@@ -45,6 +48,8 @@ $script:poServices = @()
 $script:poBackups = @()
 $script:poTempPreview = $null
 $script:poMonitorTimer = $null
+$script:poDisplayInventory = $null
+$script:poAudioInventory = $null
 
 function Get-POControl {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -200,7 +205,7 @@ function Refresh-POHome {
 
 function Set-POPage {
     param([Parameter(Mandatory = $true)][string]$Page)
-    $pages = @('Home','Optimize','Profiles','Tweaks','Games','Hardware','Network','Input','Storage','Debloat','Services','Startup','Diagnostics','Restore','Settings')
+    $pages = @('Home','Optimize','Power','Audio','Display','Profiles','Tweaks','Games','Hardware','Network','Input','Storage','Debloat','Services','Startup','Diagnostics','Restore','Settings')
     foreach ($name in $pages) {
         $control = $script:poWindow.FindName($name + 'Panel')
         if ($control) { $control.Visibility = if ($name -eq $Page) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed } }
@@ -209,7 +214,10 @@ function Set-POPage {
     }
     $titles = @{
         Home = @('Home', 'System status, hardware summary, and honest readiness facts.')
-        Optimize = @('Optimize', 'Preview, validate, back up, apply, verify, and restore.')
+        Optimize = @('Optimize', 'Hardware-aware gaming workflow: detect, baseline, back up, apply permitted changes, verify, restore.')
+        Power = @('Power plan', 'Platinum On Steroids | presets | core parking readout | previous-plan restore.')
+        Audio = @('Audio & Headphones', 'Verified detection plus presets whose only automatic change is restorable. Optional and independent.')
+        Display = @('Display & Colors', 'Per-display gamma and refresh with captured-original restore. No GPU registry writes.')
         Profiles = @('Profiles', 'Safe | Balanced | Gaming | Competitive | Maximum Performance | Laptop Battery | Custom')
         Tweaks = @('Tweak catalog', 'Every automated action is classified; unverified legacy tweaks are retired.')
         Games = @('Game library', 'Local discovery and advisory profiles; no game injection.')
@@ -235,6 +243,9 @@ function Set-POPage {
             'Startup' { Refresh-POStartupRows }
             'Debloat' { Refresh-POAppxRows }
             'Restore' { Refresh-POBackups }
+            'Power' { Refresh-POPowerPage }
+            'Audio' { Refresh-POAudioPage }
+            'Display' { Refresh-PODisplayPage }
         }
     }
     catch { Set-POFooter "Read-only $Page inventory failed: $($_.Exception.Message)" 'error' }
@@ -259,6 +270,24 @@ function Set-POProfileChoices {
     $dnsCombo.DisplayMemberPath = 'Name'
     $dnsCombo.SelectedValuePath = 'Id'
     $dnsCombo.SelectedValue = 'Automatic'
+    $platinumCombo = Get-POControl 'PlatinumPresetCombo'
+    $platinumItems = @(Get-POPlatinumPresetCatalog | ForEach-Object { [pscustomobject]@{ Id = [string]$_.id; Name = [string]$_.name } })
+    $platinumCombo.ItemsSource = $platinumItems
+    $platinumCombo.DisplayMemberPath = 'Name'
+    $platinumCombo.SelectedValuePath = 'Id'
+    if ($platinumItems.Count -gt 0) { $platinumCombo.SelectedValue = 'gaming' }
+    $audioCombo = Get-POControl 'AudioPresetCombo'
+    $audioItems = @(Get-POAudioPresets | ForEach-Object { [pscustomobject]@{ Id = [string]$_.id; Name = [string]$_.name } })
+    $audioCombo.ItemsSource = $audioItems
+    $audioCombo.DisplayMemberPath = 'Name'
+    $audioCombo.SelectedValuePath = 'Id'
+    if ($audioItems.Count -gt 0) { $audioCombo.SelectedValue = 'competitive-fps' }
+    $displayProfileCombo = Get-POControl 'DisplayProfileCombo'
+    $displayItems = @(Get-PODisplayProfiles | ForEach-Object { [pscustomobject]@{ Id = [string]$_.id; Name = [string]$_.name } })
+    $displayProfileCombo.ItemsSource = $displayItems
+    $displayProfileCombo.DisplayMemberPath = 'Name'
+    $displayProfileCombo.SelectedValuePath = 'Id'
+    if ($displayItems.Count -gt 0) { $displayProfileCombo.SelectedValue = 'platinum-competitive' }
     (Get-POControl 'SimulationModeCheck').IsChecked = $true
 }
 
@@ -294,35 +323,414 @@ function Show-POProfilePlan {
     Set-POFooter 'Profile compatibility check complete | nothing applied' 'good'
 }
 
+function Refresh-POPowerPage {
+    $info = Get-POPlatinumPlanInfo
+    $lines = New-Object System.Collections.Generic.List[string]
+    if ($info.Exists) {
+        $lines.Add("Plan: $($info.PlanName)")
+        $lines.Add("GUID: $($info.PlanGuid)")
+        $lines.Add("Active: $(if ($info.IsActive) { 'YES' } else { 'no' })  |  Active plan GUID: $(if ($info.ActivePlanGuid) { $info.ActivePlanGuid } else { 'Unknown' })")
+        $lines.Add("Applied preset: $(if ($info.AppliedPresetId) { $info.AppliedPresetId } else { 'none applied by this app yet' })  |  Created: $(if ($info.CreatedAtUtc) { $info.CreatedAtUtc } else { 'unknown' })")
+        $lines.Add("Recorded previous plan: $(if ($info.OriginalActivePlanGuid) { $info.OriginalActivePlanGuid } else { 'not recorded' })")
+        if ($info.QueryError) { $lines.Add("WARNING: $($info.QueryError)") }
+        if (@($info.SettingsReport).Count -gt 0) {
+            $lines.Add('')
+            $lines.Add('Documented processor/platform settings in this plan:')
+            foreach ($row in @($info.SettingsReport)) {
+                if ($row.Supported) { $lines.Add("  $($row.Name): AC $(if ($null -ne $row.AcValue) { $row.AcValue } else { '?' }) / DC $(if ($null -ne $row.DcValue) { $row.DcValue } else { '?' }) [$($row.Unit)]") }
+                else { $lines.Add("  $($row.Name): Not supported on this system (skipped, never forced)") }
+            }
+        }
+    }
+    else {
+        $lines.Add("The '$($info.PlanName)' plan does not exist yet.")
+        $lines.Add("Active plan GUID: $(if ($info.ActivePlanGuid) { $info.ActivePlanGuid } else { 'Unknown' })")
+        $lines.Add('Use Create / validate plan to build it from the documented High Performance scheme. Existing plans are preserved.')
+    }
+    (Get-POControl 'PlatinumPlanStatusText').Text = ($lines -join "`n")
+    try {
+        $parking = Get-POCpuParkingStatus
+        $cpuLines = New-Object System.Collections.Generic.List[string]
+        $cpuLines.Add("Active plan: $(if ($parking.ActivePlanName) { $parking.ActivePlanName } else { 'Unknown' }) ($($parking.ActivePlanGuid))")
+        foreach ($setting in @($parking.ProcessorSettings)) {
+            if ($setting.Supported) { $cpuLines.Add("  $($setting.Name): AC $(if ($null -ne $setting.AcValue) { $setting.AcValue } else { '?' }) / DC $(if ($null -ne $setting.DcValue) { $setting.DcValue } else { '?' })") }
+            else { $cpuLines.Add("  $($setting.Name): Not exposed by Windows on this platform") }
+        }
+        $cpuLines.Add("Core-parking settings exposed by this system: $(if ($parking.CoreParkingVisible) { 'yes' } else { 'no (Windows manages parking internally)' })")
+        $cpuLines.Add($parking.QuickCpu.Note)
+        (Get-POControl 'CpuParkingText').Text = ($cpuLines -join "`n")
+        (Get-POControl 'QuickCpuText').Text = "Quick CPU: $(if ($parking.QuickCpu.Installed) { "detected at $($parking.QuickCpu.Path)" } else { 'not detected (optional; never downloaded by this app)' }).`nMaximum Gaming Performance = the Competitive preset on a desktop on AC power; it pins clocks and unparks all cores and therefore needs the separate thermal confirmation."
+    }
+    catch {
+        (Get-POControl 'CpuParkingText').Text = "CPU power status unavailable: $($_.Exception.Message)"
+    }
+    Set-POFooter 'Power plan state refreshed | nothing changed' 'good'
+}
+
+function Invoke-POCreatePlatinumPlanFromUi {
+    try {
+        $info = Get-POPlatinumPlanInfo
+        if ($info.Exists) {
+            Refresh-POPowerPage
+            Show-POMessage -Text "The '$($info.PlanName)' plan already exists ($($info.PlanGuid)). It was inspected, not duplicated. Existing plans remain untouched." -Title 'Plan already present'
+            return
+        }
+        $confirm = "Create the '$(Get-POPlatinumPlanName)' power plan?`n`nSource: the documented High Performance scheme (powercfg /duplicatescheme).`nName: exactly '$(Get-POPlatinumPlanName)'.`nExisting plans: preserved, never deleted.`nAdministrator is required and no plan is activated without a separate confirmation."
+        if (-not (Confirm-POAction -Text $confirm -Title 'Create Platinum On Steroids plan')) { return }
+        $result = New-POPlatinumPlan -Confirm:$false
+        (Get-POControl 'PowerApplyStatusText').Text = "$($result.Status): $($result.Message)"
+        Set-POFooter "$($result.Status): $($result.Message)" $(if ($result.Status -eq 'CREATED' -or $result.Status -eq 'EXISTS_VALIDATED') { 'good' } else { 'warning' })
+        Refresh-POPowerPage
+    }
+    catch {
+        (Get-POControl 'PowerApplyStatusText').Text = $_.Exception.Message
+        Set-POFooter $_.Exception.Message 'error'
+        Show-POMessage -Text $_.Exception.Message -Title 'Plan was not created' -Icon Error
+    }
+}
+
+function Invoke-POApplyPlatinumPresetFromUi {
+    $presetId = [string](Get-POControl 'PlatinumPresetCombo').SelectedValue
+    if (-not $presetId) { Show-POMessage 'Select a Platinum preset first.'; return }
+    $catalog = Get-POPowerSettingCatalog
+    $preset = @($catalog.presets | Where-Object { $_.id -eq $presetId } | Select-Object -First 1)
+    if ($preset.Count -eq 0) { Show-POMessage 'Unknown preset.'; return }
+    $preset = $preset[0]
+    $info = Get-POPlatinumPlanInfo
+    $confirm = "Apply '$($preset.name)' to the $(Get-POPlatinumPlanName) plan?`n`n$($preset.description)`n`nThe plan is created if missing (existing plans preserved), every supported setting is written with powercfg and read back, unsupported settings are skipped and listed, and a timestamped backup with the current active plan is created first. The previous plan is NOT switched unless you confirm activation.`nAdministrator: required. Reboot: not required."
+    if (-not (Confirm-POAction -Text $confirm -Title 'Review exact power change')) { return }
+    if ($preset.requiresThermalConfirmation) {
+        $thermal = "THERMAL / POWER WARNING ($($preset.name))`n`nThis preset pins the minimum processor state to 100% on AC and keeps every core unparked. Expect higher idle power draw, heat, and fan noise. It is not applied on battery. Do not continue if the machine is already hot.`n`nExplicitly continue?"
+        if (-not (Confirm-POAction -Text $thermal -Title 'Advanced power warning')) { return }
+    }
+    try {
+        $result = Invoke-POPlatinumPlanWorkflow -PresetId $presetId -Confirm:$false
+        $statusText = "$($result.Status): $($result.Message)"
+        if (@($result.Applied).Count -gt 0) { $statusText += "`n`nApplied and verified:`n" + (@($result.Applied) -join "`n") }
+        if (@($result.Skipped).Count -gt 0) { $statusText += "`n`nSkipped (not supported or rejected):`n" + (@($result.Skipped) -join "`n") }
+        if ($result.Backup) { $statusText += "`nBackup: $($result.Backup.Id)" }
+        (Get-POControl 'PowerApplyStatusText').Text = $statusText
+        $tone = if ($result.Status -like 'FAILED*') { 'error' } elseif ($result.Status -like 'APPLIED*') { 'good' } else { 'normal' }
+        Set-POFooter $result.Message $tone
+        Write-POLog -Category 'Power' -Status $result.Status -Message $result.Message
+        if ($result.Status -like 'APPLIED*') {
+            Refresh-POPowerPage
+            Refresh-POBackups
+            if (-not $result.Activated -and (Confirm-POAction -Text "The preset is applied and verified, and your previous plan is still active.`n`nActivate '$(Get-POPlatinumPlanName)' now? Windows will be asked to report it as active and the result is verified." -Title 'Activate now?')) {
+                Invoke-POActivatePlatinumFromUi
+            }
+        }
+    }
+    catch {
+        (Get-POControl 'PowerApplyStatusText').Text = $_.Exception.Message
+        Set-POFooter $_.Exception.Message 'error'
+        Show-POMessage -Text $_.Exception.Message -Title 'Preset was not applied' -Icon Error
+    }
+}
+
+function Invoke-POActivatePlatinumFromUi {
+    try {
+        $result = Set-POPlatinumPlanActive -Confirm:$false
+        (Get-POControl 'PowerApplyStatusText').Text = "$($result.Status): $($result.Message)"
+        Set-POFooter "$($result.Status): $($result.Message)" $(if ($result.Status -like '*VERIFIED*' -or $result.Status -eq 'ALREADY_ACTIVE') { 'good' } elseif ($result.Status -eq 'SIMULATED') { 'normal' } else { 'error' })
+        Refresh-POPowerPage
+    }
+    catch {
+        (Get-POControl 'PowerApplyStatusText').Text = $_.Exception.Message
+        Set-POFooter $_.Exception.Message 'error'
+        Show-POMessage -Text $_.Exception.Message -Title 'Plan was not activated' -Icon Error
+    }
+}
+
+function Invoke-PORestorePowerPlanFromUi {
+    try {
+        $state = Get-POPlatinumState
+        if ($null -eq $state -or -not $state.OriginalActivePlanGuid) {
+            Show-POMessage 'No previous active plan was recorded by Platinum Optimizer, so there is nothing to restore. Use Restore Center for backups.'
+            return
+        }
+        if (-not (Confirm-POAction -Text "Restore the power plan that was active before Platinum On Steroids ($($state.OriginalActivePlanGuid))?`n`nThe Platinum plan itself is kept (not deleted). All other plans are untouched." -Title 'Restore previous power plan')) { return }
+        $result = Restore-POPreviousPowerPlan -Confirm:$false
+        (Get-POControl 'PowerApplyStatusText').Text = "$($result.Status): $($result.Message)"
+        Set-POFooter "$($result.Status): $($result.Message)" $(if ($result.Status -like '*VERIFIED*' -or $result.Status -eq 'ALREADY_RESTORED') { 'good' } else { 'warning' })
+        Refresh-POPowerPage
+    }
+    catch {
+        (Get-POControl 'PowerApplyStatusText').Text = $_.Exception.Message
+        Set-POFooter $_.Exception.Message 'error'
+        Show-POMessage -Text $_.Exception.Message -Title 'Power plan was not restored' -Icon Error
+    }
+}
+
+function Format-POAudioInventoryText {
+    param([Parameter(Mandatory = $true)][psobject]$Inventory)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add($Inventory.Message)
+    $lines.Add("Audio service: $($Inventory.ServiceState)")
+    $lines.Add("Default playback/recording: $($Inventory.DefaultPlayback)")
+    $lines.Add("Spatial audio: $($Inventory.SpatialAudioState)")
+    $lines.Add("Enhancements: $($Inventory.EnhancementsState)")
+    $lines.Add("Exclusive mode: $($Inventory.ExclusiveMode)")
+    $lines.Add('')
+    $lines.Add('AUDIO CONTROLLERS (Win32_SoundDevice)')
+    foreach ($device in @($Inventory.SoundDevices)) {
+        $lines.Add("  $($device.Name) | $($device.Manufacturer) | status $($device.Status)")
+        $lines.Add("    Connection: $($device.ConnectionType)")
+    }
+    if (@($Inventory.Endpoints).Count -gt 0) {
+        $lines.Add('')
+        $lines.Add('AUDIO ENDPOINTS (PnP AudioEndpoint class)')
+        foreach ($endpoint in @($Inventory.Endpoints)) {
+            $lines.Add("  $($endpoint.FriendlyName) | $($endpoint.Status) | $($endpoint.ConnectionType)")
+        }
+    }
+    elseif ($Inventory.EndpointError) { $lines.Add(''); $lines.Add("Endpoints: $($Inventory.EndpointError)") }
+    return ($lines -join "`n")
+}
+
+function Refresh-POAudioPage {
+    try {
+        $script:poAudioInventory = Get-POAudioInventory
+        (Get-POControl 'AudioInventoryText').Text = Format-POAudioInventoryText -Inventory $script:poAudioInventory
+        Set-POFooter 'Audio inventory refreshed | nothing changed' 'good'
+    }
+    catch {
+        (Get-POControl 'AudioInventoryText').Text = "Audio inventory failed: $($_.Exception.Message)"
+        Set-POFooter $_.Exception.Message 'error'
+    }
+}
+
+function Update-POAudioPresetExplanation {
+    $presetId = [string](Get-POControl 'AudioPresetCombo').SelectedValue
+    if (-not $presetId) { (Get-POControl 'AudioPresetExplanation').Text = 'Select a preset to read exactly what it changes and why.'; return }
+    $preset = @(Get-POAudioPresets | Where-Object { $_.id -eq $presetId } | Select-Object -First 1)
+    if ($preset.Count -eq 0) { return }
+    $preset = $preset[0]
+    $text = $preset.description
+    if (@($preset.whatChanges).Count -gt 0) { $text += "`n`nChanges automatically: " + (@($preset.whatChanges) -join ' ') }
+    else { $text += "`n`nChanges automatically: nothing (restore uses the captured values only)." }
+    $text += "`nWhy: $($preset.why)"
+    (Get-POControl 'AudioPresetExplanation').Text = $text
+}
+
+function Invoke-POApplyAudioPresetFromUi {
+    $presetId = [string](Get-POControl 'AudioPresetCombo').SelectedValue
+    if (-not $presetId) { Show-POMessage 'Select an audio preset first.'; return }
+    $preset = @(Get-POAudioPresets | Where-Object { $_.id -eq $presetId } | Select-Object -First 1)
+    if ($preset.Count -eq 0) { Show-POMessage 'Unknown audio preset.'; return }
+    $preset = $preset[0]
+    $confirm = "Apply audio preset '$($preset.name)'?`n`n$($preset.description)`n`nAutomatic changes: $(if (@($preset.whatChanges).Count -gt 0) { @($preset.whatChanges) -join ' ' } else { 'none' })`nThe captured original is backed up first and restorable at any time. The microphone and default devices are never touched. Audio stays independent of the gaming optimization."
+    if (-not (Confirm-POAction -Text $confirm -Title 'Confirm audio change')) { return }
+    try {
+        $result = Invoke-POAudioPreset -PresetId $presetId -Confirm:$false
+        $statusText = "$($result.Status): $($result.Message)"
+        if (@($result.ManualSteps).Count -gt 0) { $statusText += "`n`nManual (optional, supported Windows UI):`n" + (@($result.ManualSteps) | ForEach-Object { "- $_" } | ForEach-Object { $_ }) -join "`n" }
+        (Get-POControl 'AudioApplyStatusText').Text = $statusText
+        (Get-POControl 'AudioManualStepsText').Text = if (@($result.ManualSteps).Count -gt 0) { 'Manual steps shown above are optional and use supported Windows UI only.' } else { '' }
+        Set-POFooter "$($result.Status): $($result.Message)" $(if ($result.Status -like '*VERIFIED*') { 'good' } elseif ($result.Status -eq 'FAILED') { 'error' } else { 'normal' })
+        Refresh-POBackups
+    }
+    catch {
+        (Get-POControl 'AudioApplyStatusText').Text = $_.Exception.Message
+        Set-POFooter $_.Exception.Message 'error'
+        Show-POMessage -Text $_.Exception.Message -Title 'Audio preset was not applied' -Icon Error
+    }
+}
+
+function Invoke-PORestoreAudioFromUi {
+    try {
+        $result = Restore-POAudioSettings -Confirm:$false
+        (Get-POControl 'AudioApplyStatusText').Text = "$($result.Status): $($result.Message)"
+        (Get-POControl 'AudioManualStepsText').Text = ''
+        Set-POFooter "$($result.Status): $($result.Message)" $(if ($result.Status -like '*VERIFIED*' -or $result.Status -eq 'NO_CHANGES') { 'good' } else { 'normal' })
+    }
+    catch {
+        (Get-POControl 'AudioApplyStatusText').Text = $_.Exception.Message
+        Set-POFooter $_.Exception.Message 'error'
+        Show-POMessage -Text $_.Exception.Message -Title 'Audio was not restored' -Icon Error
+    }
+}
+
+function Format-PODisplayInventoryText {
+    param([Parameter(Mandatory = $true)][psobject]$Inventory)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add($Inventory.Message)
+    foreach ($display in @($Inventory.Displays)) {
+        $lines.Add('')
+        $lines.Add("$($display.DeviceName) $(if ($display.IsPrimary) { '(primary)' } else { '' })")
+        $lines.Add("  GPU: $($display.AdapterDescription) [$($display.GpuVendor)]")
+        $lines.Add("  Monitor: $($display.MonitorDescription) | PnP: $($display.MonitorPnpId)")
+        $lines.Add("  Mode: $($display.Resolution) @ $($display.RefreshRateHz) Hz, $($display.BitsPerPel) bpp | highest available at this resolution: $(if ($null -ne $display.HighestAvailableRefreshAtCurrentResolution) { "$($display.HighestAvailableRefreshAtCurrentResolution) Hz" } else { 'Unknown' }) ($($display.EnumeratedModes) modes enumerated)")
+        $lines.Add("  HDR: $($display.HDR)")
+        $lines.Add("  ICC: $($display.IccProfile)")
+    }
+    $lines.Add('')
+    $lines.Add("DDC/CI: $($Inventory.DdcCi)")
+    foreach ($control in @($Inventory.GpuColorControls)) { $lines.Add($control) }
+    return ($lines -join "`n")
+}
+
+function Refresh-PODisplayPage {
+    try {
+        $script:poDisplayInventory = Get-PODisplayInventory
+        (Get-POControl 'DisplayInventoryText').Text = Format-PODisplayInventoryText -Inventory $script:poDisplayInventory
+        $combo = Get-POControl 'DisplayCombo'
+        $items = @($script:poDisplayInventory.Displays | ForEach-Object { [pscustomobject]@{ Id = [string]$_.DeviceName; Name = "$(if ($_.IsPrimary) { '[Primary] ' } else { '' })$($_.DeviceName) - $($_.Resolution) @ $($_.RefreshRateHz) Hz" } })
+        $combo.ItemsSource = $items
+        $combo.DisplayMemberPath = 'Name'
+        $combo.SelectedValuePath = 'Id'
+        $primary = @($script:poDisplayInventory.Displays | Where-Object { $_.IsPrimary } | Select-Object -First 1)
+        if ($primary.Count -gt 0) { $combo.SelectedValue = [string]$primary[0].DeviceName }
+        elseif ($items.Count -gt 0) { $combo.SelectedIndex = 0 }
+        Set-POFooter 'Display inventory refreshed | nothing changed' 'good'
+    }
+    catch {
+        (Get-POControl 'DisplayInventoryText').Text = "Display inventory failed: $($_.Exception.Message)"
+        Set-POFooter $_.Exception.Message 'error'
+    }
+}
+
+function Update-PODisplayProfileExplanation {
+    $profileId = [string](Get-POControl 'DisplayProfileCombo').SelectedValue
+    if (-not $profileId) { (Get-POControl 'DisplayProfileExplanation').Text = 'Select a display and a profile to read its purpose, scope, and trade-offs.'; return }
+    $profile = @(Get-PODisplayProfiles | Where-Object { $_.id -eq $profileId } | Select-Object -First 1)
+    if ($profile.Count -eq 0) { return }
+    $profile = $profile[0]
+    $text = "$($profile.purpose)`nScope: $($profile.scope)"
+    if ($null -ne $profile.PSObject.Properties['gamma'] -and $null -ne $profile.gamma -and [string]$profile.gamma -ne 'restore-captured') { $text += "`nGamma target: $($profile.gamma) (clamped, absolute, identical on R/G/B)" }
+    if (@($profile.tradeoffs).Count -gt 0) { $text += "`nTrade-offs: " + (@($profile.tradeoffs) -join ' ') }
+    $text += "`nVendor saturation: $($profile.vibranceGuidance)"
+    (Get-POControl 'DisplayProfileExplanation').Text = $text
+}
+
+function Invoke-POApplyDisplayProfileFromUi {
+    $profileId = [string](Get-POControl 'DisplayProfileCombo').SelectedValue
+    $deviceName = [string](Get-POControl 'DisplayCombo').SelectedValue
+    if (-not $profileId) { Show-POMessage 'Select a display profile first.'; return }
+    if (-not $deviceName) { Show-POMessage 'Select the target display first.'; return }
+    $profile = @(Get-PODisplayProfiles | Where-Object { $_.id -eq $profileId } | Select-Object -First 1)
+    if ($profile.Count -eq 0) { Show-POMessage 'Unknown display profile.'; return }
+    $profile = $profile[0]
+    $confirm = "Apply '$($profile.name)' to $deviceName ONLY?`n`n$($profile.purpose)`n`nScope: $($profile.scope)`nTrade-offs: $(if (@($profile.tradeoffs).Count -gt 0) { @($profile.tradeoffs) -join ' ' } else { 'none listed' })`n`nThe original mode and gamma ramp of this display are captured before the first change and restorable at any time. Gamma is clamped and identical on all channels. No GPU registry value is written. Other displays are untouched."
+    if (-not (Confirm-POAction -Text $confirm -Title 'Confirm display change')) { return }
+    try {
+        $result = Invoke-PODisplayProfile -ProfileId $profileId -DeviceName $deviceName -Confirm:$false
+        $statusText = "$($result.Status): $($result.Message)"
+        if ($result.Guidance) { $statusText += "`nVendor saturation (manual): $($result.Guidance)" }
+        if ($result.SettingsUri) { $statusText += "`nOpen: $($result.SettingsUri)" }
+        (Get-POControl 'DisplayApplyStatusText').Text = $statusText
+        $tone = if ($result.Status -eq 'APPLIED_VERIFIED' -or $result.Status -eq 'RESTORED_VERIFIED') { 'good' } elseif ($result.Status -eq 'FAILED') { 'error' } else { 'normal' }
+        Set-POFooter "$($result.Status): $($result.Message)" $tone
+        Refresh-PODisplayPage
+        if ($result.Backup) { Refresh-POBackups }
+    }
+    catch {
+        (Get-POControl 'DisplayApplyStatusText').Text = $_.Exception.Message
+        Set-POFooter $_.Exception.Message 'error'
+        Show-POMessage -Text $_.Exception.Message -Title 'Display profile was not applied' -Icon Error
+    }
+}
+
+function Invoke-PORestoreDisplayFromUi {
+    $deviceName = [string](Get-POControl 'DisplayCombo').SelectedValue
+    if (-not $deviceName) { Show-POMessage 'Select the display to restore first.'; return }
+    if (-not (Confirm-POAction -Text "Restore the captured original mode and gamma ramp for $deviceName?`nVendor saturation changed manually in a GPU control panel must be reverted there." -Title 'Restore display configuration')) { return }
+    try {
+        $result = Restore-PODisplayConfiguration -DeviceName $deviceName -Confirm:$false
+        (Get-POControl 'DisplayApplyStatusText').Text = "$($result.Status): $($result.Message)"
+        Set-POFooter "$($result.Status): $($result.Message)" $(if ($result.Status -like '*VERIFIED*' -or $result.Status -eq 'NO_CHANGES') { 'good' } else { 'normal' })
+    }
+    catch {
+        (Get-POControl 'DisplayApplyStatusText').Text = $_.Exception.Message
+        Set-POFooter $_.Exception.Message 'error'
+        Show-POMessage -Text $_.Exception.Message -Title 'Display was not restored' -Icon Error
+    }
+}
+
 function Invoke-POAutoGamingOptimize {
     [CmdletBinding()]
     param()
+    # Combined Platinum On Steroids workflow. Low-risk, reversible,
+    # evidence-supported changes can be applied automatically; audio
+    # presets, color profiles, and DNS changes are NOT part of this path
+    # and stay behind their own explicit confirmations.
 
     if (-not (Test-POIsAdministrator)) { Start-POElevated; return }
 
     $started = Get-Date
     $results = New-Object System.Collections.Generic.List[string]
-    $errors = New-Object System.Collections.Generic.List[string]
+    $skipped = New-Object System.Collections.Generic.List[string]
 
     try {
-        Set-POFooter 'Gaming optimization: preparing system...' 'normal'
-        (Get-POControl 'ReadinessTitle').Text = 'Gaming optimization in progress...'
-        (Get-POControl 'ReadinessDetail').Text = 'Applying supported Windows gaming settings. No game files are modified.'
+        Set-POFooter 'Platinum On Steroids: detecting system and hardware...' 'normal'
+        (Get-POControl 'ReadinessTitle').Text = 'Platinum On Steroids optimization in progress...'
+        (Get-POControl 'ReadinessDetail').Text = 'Detecting hardware, displays, audio, power, network, and input state before changing anything.'
 
-        # Use the existing Gaming plan engine, but remove the manual profile-selection step.
+        # 1-2. System + hardware detection, displays and audio devices.
+        $snapshot = Get-POSystemSnapshot
+        [void]$results.Add("Detection: $($snapshot.OS.Name) | CPU $(Format-POValue $snapshot.CPU.Model) | $(@($snapshot.GPUs).Count) GPU(s) | $(Format-POValue $snapshot.Memory.TotalGB 'GB') RAM")
         try {
-            $snapshot = Get-POSystemSnapshot
-            $plans = @(Get-POPowerPlans)
-            $active = Get-POActivePowerPlanGuid
-            $plan = New-POProfilePlan -ProfileId 'gaming' -SystemSnapshot $snapshot -PowerPlans $plans -ActivePlanGuid $active
-            if ($plan.Change) {
-                $result = Invoke-POProfilePlan -Plan $plan -Confirm:$false -ConfirmAdvanced:$true
-                if ($result.Status -like '*APPLIED*') { [void]$results.Add("Power policy: $($plan.TargetPowerPlanName)") }
-                else { [void]$errors.Add("Power policy: $($result.Message)") }
-            } else { [void]$results.Add('Power policy: already optimal or no compatible performance plan available') }
-        } catch { [void]$errors.Add("Power policy: $($_.Exception.Message)") }
+            $displayInventory = Get-PODisplayInventory
+            [void]$results.Add("Displays: $(@($displayInventory.Displays).Count) active display(s) detected where Windows exposes them")
+        } catch { [void]$skipped.Add("Display detection: $($_.Exception.Message)") }
+        try {
+            $audioInventory = Get-POAudioInventory
+            [void]$results.Add("Audio: $(@($audioInventory.SoundDevices).Count) sound device(s), $(@($audioInventory.Endpoints).Count) endpoint(s) detected")
+        } catch { [void]$skipped.Add("Audio detection: $($_.Exception.Message)") }
 
-        # Restore the supported Windows TCP/RSS baseline instead of obsolete registry hacks.
+        # 3. Current power plan / CPU configuration inspection.
+        $activeBefore = Get-POActivePowerPlanGuid
+        $platinumInfo = Get-POPlatinumPlanInfo
+        [void]$results.Add("Power: active plan $(if ($activeBefore) { $activeBefore } else { 'Unknown' }); Platinum plan $(if ($platinumInfo.Exists) { "present ($($platinumInfo.PlanGuid))" } else { 'not created yet' })")
+
+        # 4. Network inspection.
+        try {
+            $upAdapters = @(Get-PONetworkAdapters | Where-Object { $_.Status -eq 'Up' })
+            [void]$results.Add("Network: $($upAdapters.Count) connected adapter(s); DNS change stays manual and explicit")
+        } catch { [void]$skipped.Add("Network inspection: $($_.Exception.Message)") }
+
+        # 5. Input device information inspection.
+        try {
+            $mouseSpeed = Get-PORegValueState -Hive CurrentUser -SubKey 'Control Panel\Mouse' -ValueName 'MouseSpeed'
+            [void]$results.Add("Input: pointer MouseSpeed=$(if ($mouseSpeed.Readable -and $mouseSpeed.Exists) { $mouseSpeed.Data } else { 'Unknown' }); no pointer setting is changed")
+        } catch { [void]$skipped.Add("Input inspection: $($_.Exception.Message)") }
+
+        # 6. GPU capability inspection.
+        foreach ($gpu in @($snapshot.GPUs)) {
+            [void]$results.Add("GPU capability: $($gpu.Vendor) | $(Format-POValue $gpu.Name) | mode $(Format-POValue $gpu.ResolutionReportedByAdapter) @ $(Format-POValue $gpu.RefreshRateReportedByAdapterHz 'Hz')")
+        }
+
+        # 7-8. Recommendation + baseline sample.
+        $presetId = 'gaming'
+        if ($snapshot.Device.IsLaptop -eq $true) { $presetId = 'laptop' }
+        try { $sample = Get-POResourceSample; [void]$results.Add("Baseline: CPU $(Format-POValue $sample.CpuPercent '%'), $(Format-POValue $sample.AvailableMemoryGB 'GB') RAM available at capture") }
+        catch { [void]$skipped.Add('Baseline sample unavailable.') }
+
+        # 9-11. Backup + apply permitted low-risk changes (the Platinum plan).
+        $applyPlan = $true
+        if (-not $snapshot.OS.Supported) { $applyPlan = $false; [void]$skipped.Add('Power plan: Windows family not identified as 10/11; plan change blocked.') }
+        if ($snapshot.Device.IsLaptop -eq $true -and $snapshot.Device.PowerSource -eq 'Battery') { $applyPlan = $false; [void]$skipped.Add('Power plan: portable device is on battery; high-performance plan blocked. Re-run on AC or use the Laptop preset manually.') }
+        if ($snapshot.Device.IsLaptop -eq $true -and $snapshot.Device.PowerSource -ne 'AC') { $applyPlan = $false; [void]$skipped.Add('Power plan: AC power could not be positively confirmed on this portable device; plan change blocked.') }
+        if ($applyPlan) {
+            try {
+                $planResult = Invoke-POPlatinumPlanWorkflow -PresetId $presetId -Confirm:$false
+                if ($planResult.Status -like 'APPLIED*') {
+                    [void]$results.Add("Power policy: Platinum On Steroids preset '$presetId' applied and verified ($($planResult.PlanGuid)); $($planResult.Applied.Count) settings verified, $($planResult.Skipped.Count) skipped")
+                    if (@($planResult.Skipped).Count -gt 0) { [void]$skipped.Add("Power settings skipped as not supported: $($planResult.Skipped.Count)") }
+                    if (-not $planResult.Activated) {
+                        if (Confirm-POAction -Text "Platinum On Steroids is configured and verified; your previous plan is still active.`nBackup: $($planResult.Backup.Id)`n`nActivate 'Platinum On Steroids' now?`n(Verify: Windows is asked to report it active and the result is checked.)" -Title 'Activate Platinum On Steroids?') {
+                            try {
+                                $activateResult = Set-POPlatinumPlanActive -Confirm:$false
+                                [void]$results.Add("Power policy activation: $($activateResult.Message)")
+                            } catch { [void]$skipped.Add("Power policy activation failed: $($_.Exception.Message) Previous plan left active.") }
+                        } else { [void]$skipped.Add('Power policy: user declined activation; the previous plan remains active.') }
+                    }
+                }
+                else { [void]$skipped.Add("Power policy: $($planResult.Message)") }
+            } catch { [void]$skipped.Add("Power policy: $($_.Exception.Message)") }
+        }
+
+        # TCP baseline (supported netsh interface).
         if (Get-Command netsh.exe -ErrorAction SilentlyContinue) {
             try {
                 & netsh.exe int tcp set global rss=enabled | Out-Null
@@ -330,13 +738,13 @@ function Invoke-POAutoGamingOptimize {
                 & netsh.exe int tcp set global ecncapability=disabled | Out-Null
                 & netsh.exe int tcp set global timestamps=disabled | Out-Null
                 [void]$results.Add('TCP baseline: RSS enabled, autotuning normal, ECN disabled, timestamps disabled')
-            } catch { [void]$errors.Add("TCP baseline: $($_.Exception.Message)") }
+            } catch { [void]$skipped.Add("TCP baseline: $($_.Exception.Message)") }
         }
 
         try { & ipconfig.exe /flushdns | Out-Null; [void]$results.Add('DNS cache: flushed') }
-        catch { [void]$errors.Add("DNS cache: $($_.Exception.Message)") }
+        catch { [void]$skipped.Add("DNS cache: $($_.Exception.Message)") }
 
-        # Prevent an active physical Ethernet NIC from being power-managed away when supported.
+        # Keep an active physical Ethernet NIC from being power-managed away when supported.
         try {
             $ethernetAdapters = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' -and [string]$_.InterfaceDescription -notmatch '(?i)wi-?fi|wireless|802\.11|bluetooth' })
             if ($ethernetAdapters.Count -gt 0 -and (Get-Command Set-NetAdapterPowerManagement -ErrorAction SilentlyContinue)) {
@@ -344,24 +752,27 @@ function Invoke-POAutoGamingOptimize {
                     try {
                         Set-NetAdapterPowerManagement -Name $adapter.Name -AllowComputerToTurnOffDevice Disabled -ErrorAction Stop
                         [void]$results.Add("Ethernet power management: kept active for $($adapter.Name)")
-                    } catch { [void]$errors.Add("Ethernet $($adapter.Name): $($_.Exception.Message)") }
+                    } catch { [void]$skipped.Add("Ethernet $($adapter.Name): $($_.Exception.Message)") }
                 }
             } elseif ($ethernetAdapters.Count -eq 0) {
                 [void]$results.Add('Ethernet: no active physical Ethernet adapter detected')
             } else { [void]$results.Add('Ethernet: driver does not expose the Windows power-management control') }
-        } catch { [void]$errors.Add("Ethernet detection: $($_.Exception.Message)") }
+        } catch { [void]$skipped.Add("Ethernet detection: $($_.Exception.Message)") }
 
+        # 12-13. Results, skipped operations, restore offer.
         $elapsed = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
-        $summary = "Gaming optimization complete in $elapsed s.$nl$nl" + ($results -join $nl)
-        if ($errors.Count -gt 0) { $summary += "$nl$nlWarnings (non-fatal):$nl" + ($errors -join $nl) }
-        (Get-POControl 'ReadinessTitle').Text = 'Gaming optimization complete'
-        (Get-POControl 'ReadinessDetail').Text = 'The automatic gaming baseline is applied. Actual FPS and game-server ping still depend on hardware, drivers, the game, server and route.'
+        $summary = "Platinum On Steroids workflow complete in $elapsed s.`n`nAPPLIED / VERIFIED`n" + ($results -join "`n")
+        if ($skipped.Count -gt 0) { $summary += "`n`nSKIPPED (explained, never reported as success)`n" + ($skipped -join "`n") }
+        $summary += "`n`nNot applied automatically (need their own consent): audio presets, display color profiles, DNS resolver changes.`nRestore: Restore Center rolls back recorded changes; the Power page has a one-click previous-plan restore."
+        (Get-POControl 'ReadinessTitle').Text = 'Platinum On Steroids optimization complete'
+        (Get-POControl 'ReadinessDetail').Text = 'Permitted low-risk changes were applied and verified. Actual FPS and ping still depend on hardware, drivers, the game, server, and route.'
         (Get-POControl 'ScoreText').Text = 'Gaming score: NOT SCORED - run a real in-game benchmark to measure FPS/frame time.'
-        Set-POFooter 'Gaming baseline applied · no game files modified' 'good'
-        Show-POMessage -Text $summary -Title 'Platinum Optimizer - Gaming mode' -Icon Information
+        Set-POFooter 'Platinum On Steroids workflow finished · audio and color changes stay optional' 'good'
+        Show-POMessage -Text $summary -Title 'Platinum Optimizer - Platinum On Steroids' -Icon Information
+        Refresh-POBackups
     } catch {
-        Set-POFooter "Gaming optimization failed: $($_.Exception.Message)" 'error'
-        Show-POMessage -Text $_.Exception.Message -Title 'Gaming optimization failed' -Icon Error
+        Set-POFooter "Platinum On Steroids optimization failed: $($_.Exception.Message)" 'error'
+        Show-POMessage -Text $_.Exception.Message -Title 'Optimization stopped' -Icon Error
     }
 }
 function Invoke-POApplyProfile {
@@ -638,7 +1049,7 @@ function Start-POElevated {
 Set-POProfileChoices
 Refresh-POProfileCatalogUi
 Refresh-POTweaksUi
-$navButtons = @('Home','Optimize','Profiles','Tweaks','Games','Hardware','Network','Input','Storage','Debloat','Services','Startup','Diagnostics','Restore','Settings')
+$navButtons = @('Home','Optimize','Power','Audio','Display','Profiles','Tweaks','Games','Hardware','Network','Input','Storage','Debloat','Services','Startup','Diagnostics','Restore','Settings')
 foreach ($page in $navButtons) {
     $nav = $script:poWindow.FindName('Nav' + $page)
     if ($nav) { $nav.Add_Click({ param($sender, $eventArgs) Set-POPage -Page ([string]$sender.Tag) }) }
@@ -647,6 +1058,30 @@ foreach ($page in $navButtons) {
 (Get-POControl 'RescanButton').Add_Click({ Refresh-POHome })
 (Get-POControl 'OptimizeNowButton').Add_Click({ Invoke-POAutoGamingOptimize })
 (Get-POControl 'BaselineButton').Add_Click({ Set-POPage 'Diagnostics'; Capture-POBenchmark -Label 'before' })
+
+# Power plan (Platinum On Steroids) wiring.
+(Get-POControl 'RefreshPowerButton').Add_Click({ try { Refresh-POPowerPage } catch { Set-POFooter $_.Exception.Message 'error' } })
+(Get-POControl 'CreatePlatinumPlanButton').Add_Click({ Invoke-POCreatePlatinumPlanFromUi })
+(Get-POControl 'ApplyPlatinumPresetButton').Add_Click({ Invoke-POApplyPlatinumPresetFromUi })
+(Get-POControl 'ActivatePlatinumButton').Add_Click({ Invoke-POActivatePlatinumFromUi })
+(Get-POControl 'RestorePowerPlanButton').Add_Click({ Invoke-PORestorePowerPlanFromUi })
+(Get-POControl 'OpenPowerSettingsButton').Add_Click({ try { Start-Process control.exe -ArgumentList 'powercfg.cpl' -ErrorAction Stop } catch { Show-POMessage -Text $_.Exception.Message -Title 'Could not open power settings' -Icon Error } })
+
+# Audio wiring.
+(Get-POControl 'RefreshAudioButton').Add_Click({ Refresh-POAudioPage })
+(Get-POControl 'AudioPresetCombo').Add_SelectionChanged({ Update-POAudioPresetExplanation })
+(Get-POControl 'ApplyAudioPresetButton').Add_Click({ Invoke-POApplyAudioPresetFromUi })
+(Get-POControl 'RestoreAudioButton').Add_Click({ Invoke-PORestoreAudioFromUi })
+(Get-POControl 'OpenSoundSettingsButton').Add_Click({ try { Open-POWindowsSettings -Uri 'ms-settings:sound' } catch { Show-POMessage -Text $_.Exception.Message -Title 'Could not open Settings' -Icon Error } })
+(Get-POControl 'OpenMmsysButton').Add_Click({ try { Start-Process rundll32.exe -ArgumentList 'shell32.dll,Control_RunDLL mmsys.cpl,,0' -ErrorAction Stop } catch { Show-POMessage -Text $_.Exception.Message -Title 'Could not open Sound Control Panel' -Icon Error } })
+
+# Display wiring.
+(Get-POControl 'RefreshDisplaysButton').Add_Click({ Refresh-PODisplayPage })
+(Get-POControl 'DisplayProfileCombo').Add_SelectionChanged({ Update-PODisplayProfileExplanation })
+(Get-POControl 'ApplyDisplayProfileButton').Add_Click({ Invoke-POApplyDisplayProfileFromUi })
+(Get-POControl 'RestoreDisplayButton').Add_Click({ Invoke-PORestoreDisplayFromUi })
+(Get-POControl 'OpenDisplaySettingsButton').Add_Click({ try { Open-POWindowsSettings -Uri 'ms-settings:display' } catch { Show-POMessage -Text $_.Exception.Message -Title 'Could not open Settings' -Icon Error } })
+(Get-POControl 'OpenColorManagementButton').Add_Click({ try { Start-Process colorcpl.exe -ErrorAction Stop } catch { Show-POMessage -Text $_.Exception.Message -Title 'Could not open Color Management' -Icon Error } })
 (Get-POControl 'PreviewProfileButton').Add_Click({ Show-POProfilePlan })
 (Get-POControl 'ApplyProfileButton').Add_Click({ Invoke-POApplyProfile })
 (Get-POControl 'CancelProfileButton').Add_Click({
