@@ -118,6 +118,22 @@ class CliContractTests(unittest.TestCase):
         for field in ("status", "summaryText", "metrics"):
             self.assertRegex(report, rf"(?m)^\s+{field}\s*=")
 
+    def test_live_console_trace_shows_real_powercfg_commands_and_verified_settings(self) -> None:
+        core = (ROOT / "src/core/PlatinumOptimizer.Core.psm1").read_text(encoding="utf-8")
+        power = (ROOT / "src/core/PlatinumOptimizer.Power.psm1").read_text(encoding="utf-8")
+        automatic = (ROOT / "src/core/PlatinumOptimizer.Automatic.psm1").read_text(encoding="utf-8")
+        self.assertIn("[TRACE {0}] > powercfg.exe {1}", core)
+        self.assertIn("exit={2}; {3} ms", core)
+        self.assertIn("[POWER APPLY]", power)
+        self.assertIn("[POWER VERIFIED]", power)
+        self.assertIn("Label = 'APPLIED / VERIFIED'", automatic)
+
+    def test_current_console_banner_identifies_patch_release(self) -> None:
+        engine = (ROOT / "src/PlatinumOptimizer.ps1").read_text(encoding="utf-8")
+        self.assertIn("$script:POApplicationVersion = '2.0.2'", engine)
+        self.assertIn("VERSION 2.0.2", engine)
+        self.assertIn("-DisableNameChecking", engine)
+
     def test_windows_process_arguments_are_quoted_without_literal_escape_slashes(self) -> None:
         core = (ROOT / "src/core/PlatinumOptimizer.Core.psm1").read_text(encoding="utf-8")
         quote = chr(34)

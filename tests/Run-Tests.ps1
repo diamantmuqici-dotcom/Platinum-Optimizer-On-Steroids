@@ -8,7 +8,7 @@ $modulePath = Join-Path $repoRoot 'src\core\PlatinumOptimizer.Core.psm1'
 Import-Module -Name $modulePath -Global -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Power.psm1') -Global -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Audio.psm1') -Global -Force -ErrorAction Stop
-Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Display.psm1') -Global -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Display.psm1') -Global -Force -DisableNameChecking -ErrorAction Stop
 Import-Module -Name (Join-Path $repoRoot 'src\core\PlatinumOptimizer.Automatic.psm1') -Global -Force -ErrorAction Stop
 $script:CoreModule = @(Get-Module | Where-Object { $_.Path -eq $modulePath } | Select-Object -First 1)[0]
 

@@ -489,6 +489,7 @@ function Invoke-POPlatinumPresetValues {
         if ($null -eq $acValue -and $null -eq $dcValue) { continue }
         $baselineEntry = @($baseline.Settings | Where-Object { $_.Id -eq $settingId } | Select-Object -First 1)
         if ($baselineEntry.Count -eq 0) {
+            Write-Host ("[POWER SKIP] {0}: no pre-change read-back was available; no write was issued." -f [string]$setting.name) -ForegroundColor Yellow
             $changes += [pscustomobject][ordered]@{ Id = $settingId; Name = [string]$setting.name; Status = 'UNVERIFIED'; Attempted = $false; Verified = $false; PreviousValue = $null; TargetValue = $null; Reason = 'The pre-change setting snapshot did not contain this catalog setting.'; RequiresReboot = $false }
             continue
         }
@@ -500,21 +501,27 @@ function Invoke-POPlatinumPresetValues {
         foreach ($side in $sides) {
             if ($null -eq $side.Target) { continue }
             if (-not $side.Captured) {
+                Write-Host ("[POWER SKIP] {0} ({1}): Windows did not expose the setting; no write was issued." -f [string]$setting.name, $side.Name) -ForegroundColor Yellow
                 $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'SKIPPED'; Attempted = $false; Verified = $false; PreviousValue = $null; TargetValue = [int]$side.Target; Reason = 'Windows did not expose this setting for the selected power scheme; it was not written.'; RequiresReboot = $false }
                 continue
             }
             if ([int]$side.Current -eq [int]$side.Target) {
+                Write-Host ("[POWER KEEP] {0} ({1}): current value {2} already matches target {3}; no write issued." -f [string]$setting.name, $side.Name, [int]$side.Current, [int]$side.Target) -ForegroundColor DarkGray
                 $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'ALREADY_OPTIMIZED'; Attempted = $false; Verified = $true; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = 'Windows already reports the requested value.'; RequiresReboot = $false }
                 continue
             }
             $subgroupGuid = [string]$catalog.subgroups.([string]$setting.subgroup)
+            $settingLabel = "{0} ({1})" -f [string]$setting.name, $side.Name
+            Write-Host ("[POWER APPLY] {0}: Windows reported {1}; requested {2}." -f $settingLabel, [int]$side.Current, [int]$side.Target) -ForegroundColor Cyan
             try { $set = Invoke-POPowercfg -Arguments @([string]$side.Command, $PlanGuid, $subgroupGuid, [string]$side.Guid, [string][int]$side.Target) }
             catch {
+                Write-Host ("[POWER UNVERIFIED] {0}: command could not be confirmed: {1}" -f $settingLabel, $_.Exception.Message) -ForegroundColor Yellow
                 $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'UNVERIFIED'; Attempted = $true; Verified = $false; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = "The powercfg command could not be confirmed: $($_.Exception.Message)"; RequiresReboot = $false }
                 $abortVerification = $true
                 break
             }
             if ($set.TimedOut -or $set.ExitCode -ne 0) {
+                Write-Host ("[POWER FAILED] {0}: powercfg exit={1}, timeout={2}." -f $settingLabel, $set.ExitCode, $set.TimedOut) -ForegroundColor Red
                 $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'FAILED'; Attempted = $true; Verified = $false; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = "powercfg rejected or timed out applying this setting (exit code $($set.ExitCode), timeout=$($set.TimedOut)): $(($set.Output -join ' ').Trim())"; RequiresReboot = $false }
                 continue
             }
@@ -532,15 +539,18 @@ function Invoke-POPlatinumPresetValues {
                     }
                 }
                 if ($verified) {
+                    Write-Host ("[POWER VERIFIED] {0}: Windows read back {1}; requested {2}." -f $settingLabel, $actualValue, [int]$side.Target) -ForegroundColor Green
                     $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'APPLIED_VERIFIED'; Attempted = $true; Verified = $true; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = 'Written and read back from powercfg.'; RequiresReboot = $false }
                 }
                 else {
+                    Write-Host ("[POWER MISMATCH] {0}: expected {1}; Windows read back {2}." -f $settingLabel, [int]$side.Target, $actualValue) -ForegroundColor Red
                     $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'UNVERIFIED'; Attempted = $true; Verified = $false; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = "The powercfg write returned success, but read-back reported '$actualValue'."; RequiresReboot = $false }
                     $abortVerification = $true
                     break
                 }
             }
             catch {
+                Write-Host ("[POWER UNVERIFIED] {0}: read-back failed: {1}" -f $settingLabel, $_.Exception.Message) -ForegroundColor Yellow
                 $changes += [pscustomobject][ordered]@{ Id = "$settingId-$($side.Name.ToLowerInvariant())"; Name = "$($setting.name) ($($side.Name))"; Status = 'UNVERIFIED'; Attempted = $true; Verified = $false; PreviousValue = [int]$side.Current; TargetValue = [int]$side.Target; Reason = "Post-write verification failed: $($_.Exception.Message)"; RequiresReboot = $false }
                 $abortVerification = $true
                 break
