@@ -1332,7 +1332,37 @@ function Get-PORegistrySnapshotKeys {
 }
 
 function Get-POBackupRoot {
+    # Elevated runs keep machine-wide backups under ProgramData (documented,
+    # reliable, survives user-profile changes). Non-elevated runs fall back to
+    # the per-user local state root so read-only flows still work.
+    if ((Test-POIsWindows) -and (Test-POIsAdministrator) -and -not [string]::IsNullOrWhiteSpace($env:ProgramData)) {
+        return (Join-Path $env:ProgramData 'PlatinumOptimizer\Backups')
+    }
     return (Join-Path (Get-POStateRoot) 'Backups')
+}
+
+function Get-POBackupSearchRoots {
+    # Every location where Platinum Optimizer backups may live: the current
+    # ProgramData root (elevated) and the per-user local root (v1.x backups and
+    # non-elevated runs). Restore/validation accept any of these roots.
+    $roots = @()
+    if ((Test-POIsWindows) -and -not [string]::IsNullOrWhiteSpace($env:ProgramData)) {
+        $roots += (Join-Path $env:ProgramData 'PlatinumOptimizer\Backups')
+    }
+    try { $roots += (Join-Path (Get-POStateRoot) 'Backups') } catch { }
+    return @($roots | Select-Object -Unique)
+}
+
+function Test-POPathInsideBackupRoots {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $comparison = Get-POPathComparison
+    foreach ($root in @(Get-POBackupSearchRoots)) {
+        $prefix = Get-POPathRootPrefix -Path $root
+        if ($fullPath.StartsWith($prefix, $comparison)) { return $true }
+    }
+    return $false
 }
 
 function Write-POJsonAtomic {
@@ -1515,7 +1545,7 @@ function New-POBackup {
         id = Split-Path -Leaf $backupPath
         createdAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
         createdAtUtc = [DateTime]::UtcNow.ToString('o')
-        applicationVersion = '1.1.0'
+        applicationVersion = '2.0.0'
         status = 'VALID'
         modifiedSections = @()
         changes = @()
@@ -1618,31 +1648,44 @@ function Test-POBackup {
 function Get-POBackups {
     [CmdletBinding()]
     param()
-    $root = Get-POBackupRoot
-    if (-not (Test-Path -LiteralPath $root)) { return @() }
     $items = @()
-    try { $directories = @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction Stop | Sort-Object -Property LastWriteTime -Descending) }
-    catch { throw "Backup inventory could not be read from '$root': $($_.Exception.Message)" }
-    foreach ($directory in $directories) {
-        $validation = Test-POBackup -Path $directory.FullName
-        $manifest = $validation.Manifest
-        $items += [pscustomobject][ordered]@{
-            Id = $directory.Name
-            Path = $directory.FullName
-            CreatedAt = if ($manifest) { [string]$manifest.createdAt } else { $directory.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss') }
-            Status = $validation.Status
-            ChangeCount = if ($manifest) { @($manifest.changes).Count } else { 0 }
-            Changes = if ($manifest) { @($manifest.changes | ForEach-Object { $_.name }) -join ', ' } else { '' }
-            Issues = @($validation.Issues)
+    $seenPaths = @{}
+    $comparison = Get-POPathComparison
+    foreach ($root in @(Get-POBackupSearchRoots)) {
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        try { $directories = @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction Stop) }
+        catch { throw "Backup inventory could not be read from '$root': $($_.Exception.Message)" }
+        foreach ($directory in $directories) {
+            $fullKey = [System.IO.Path]::GetFullPath($directory.FullName)
+            if ($seenPaths.ContainsKey($fullKey)) { continue }
+            $seenPaths[$fullKey] = $true
+            $items += (Get-POBackupSummary -Directory $directory)
         }
     }
-    return $items
+    return @($items | Sort-Object -Property CreatedAt -Descending)
+}
+
+function Get-POBackupSummary {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Directory)
+    $validation = Test-POBackup -Path $Directory.FullName
+    $manifest = $validation.Manifest
+    return [pscustomobject][ordered]@{
+        Id = $Directory.Name
+        Path = $Directory.FullName
+        CreatedAt = if ($manifest -and $manifest.PSObject.Properties['createdAt']) { [string]$manifest.createdAt } else { $Directory.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss') }
+        Status = $validation.Status
+        ApplicationVersion = if ($manifest -and $manifest.PSObject.Properties['applicationVersion']) { [string]$manifest.applicationVersion } else { 'Unknown' }
+        ChangeCount = if ($manifest) { @($manifest.changes).Count } else { 0 }
+        Changes = if ($manifest) { @($manifest.changes | ForEach-Object { $_.name }) -join ', ' } else { '' }
+        Issues = @($validation.Issues)
+    }
 }
 
 function Add-POBackupChange {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$BackupPath,
-          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display')][string]$Section,
+          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display', 'network-tcp', 'network-adapter-power')][string]$Section,
           [Parameter(Mandatory = $true)][psobject]$Change)
     $manifestPath = Join-Path $BackupPath 'manifest.json'
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
@@ -1658,14 +1701,21 @@ function Add-POBackupChange {
 function Update-POBackupChangeStatus {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$BackupPath,
-          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display')][string]$Section,
+          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display', 'network-tcp', 'network-adapter-power')][string]$Section,
           [Parameter(Mandatory = $true)][string]$Status,
           [string]$Message = '',
+          [AllowNull()][string]$ChangeId = $null,
           [AllowNull()][string[]]$AfterIPv4)
     $manifestPath = Join-Path $BackupPath 'manifest.json'
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
     $changes = @($manifest.changes)
-    $matches = @($changes | Where-Object { $_.section -eq $Section } | Select-Object -Last 1)
+    if ([string]::IsNullOrWhiteSpace($ChangeId)) {
+        $matches = @($changes | Where-Object { $_.section -eq $Section } | Select-Object -Last 1)
+    }
+    else {
+        $matches = @($changes | Where-Object { $_.section -eq $Section -and $_.PSObject.Properties['id'] -and [string]$_.id -eq $ChangeId } | Select-Object -Last 1)
+        if ($matches.Count -eq 0) { throw "No $Section transaction with id '$ChangeId' is recorded in this backup." }
+    }
     if ($matches.Count -eq 0) { throw "No $Section transaction is recorded in this backup." }
     $change = $matches[0]
     if ($change.PSObject.Properties['status']) { $change.status = $Status }
@@ -1678,6 +1728,43 @@ function Update-POBackupChangeStatus {
     }
     $manifest.changes = $changes
     Write-POJsonAtomic -Path $manifestPath -Object $manifest
+}
+
+function Add-POBackupFile {
+    # Writes an additional snapshot file into an existing backup directory and
+    # registers it in the manifest checksum inventory, so Test-POBackup stays
+    # valid. Used for pre-change captures that are recorded after the backup
+    # skeleton was created (for example TCP state or adapter power settings).
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$BackupPath,
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content
+    )
+    $manifestPath = Join-Path $BackupPath 'manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Backup manifest is missing: $manifestPath" }
+    if ([string]::IsNullOrWhiteSpace($RelativePath)) { throw 'RelativePath must not be empty.' }
+    if ([System.IO.Path]::IsPathRooted($RelativePath)) { throw 'RelativePath must be a backup-relative path.' }
+    $target = [System.IO.Path]::GetFullPath((Join-Path $BackupPath $RelativePath))
+    $rootPrefix = Get-POPathRootPrefix -Path $BackupPath
+    if (-not $target.StartsWith($rootPrefix, (Get-POPathComparison))) { throw 'Backup file target is outside the backup directory.' }
+    if ($target.Equals([System.IO.Path]::GetFullPath($manifestPath), (Get-POPathComparison))) { throw 'The manifest cannot be overwritten through Add-POBackupFile.' }
+    $parent = Split-Path -Parent $target
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    Set-Content -LiteralPath $target -Value $Content -Encoding UTF8
+    $file = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+    $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256 -ErrorAction Stop).Hash
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    $files = @($manifest.files)
+    $entry = [pscustomobject][ordered]@{ Path = $RelativePath; Length = [long]$file.Length; SHA256 = $hash }
+    $replaced = $false
+    for ($i = 0; $i -lt $files.Count; $i++) {
+        if ($null -ne $files[$i] -and $files[$i].PSObject.Properties['Path'] -and [string]$files[$i].Path -eq $RelativePath) { $files[$i] = $entry; $replaced = $true; break }
+    }
+    if (-not $replaced) { $files += $entry }
+    $manifest.files = $files
+    Write-POJsonAtomic -Path $manifestPath -Object $manifest
+    return [pscustomobject][ordered]@{ Path = $target; RelativePath = $RelativePath; Length = [long]$file.Length; SHA256 = $hash }
 }
 
 function Set-POActivePowerPlan {
@@ -1819,12 +1906,11 @@ function Restore-POBackup {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param([Parameter(Mandatory = $true)][string]$BackupPath)
     $fullPath = [System.IO.Path]::GetFullPath($BackupPath)
-    $root = Get-POPathRootPrefix -Path (Get-POBackupRoot)
-    if (-not $fullPath.StartsWith($root, (Get-POPathComparison))) { throw 'Restore is limited to backups inside the Platinum Optimizer backup directory.' }
+    if (-not (Test-POPathInsideBackupRoots -Path $fullPath)) { throw 'Restore is limited to backups inside a Platinum Optimizer backup directory.' }
     $validation = Test-POBackup -Path $fullPath
     if (-not $validation.Valid) { throw ('Backup validation failed: ' + (@($validation.Issues) -join '; ')) }
     $manifest = $validation.Manifest
-    $allowedSections = @('power', 'network', 'registry', 'audio', 'display')
+    $allowedSections = @('power', 'network', 'registry', 'audio', 'display', 'network-tcp', 'network-adapter-power')
     $sections = @($manifest.modifiedSections | Select-Object -Unique)
     $unknownSections = @($sections | Where-Object { $_ -notin $allowedSections })
     if ($unknownSections.Count -gt 0) { throw ('Backup contains unsupported restore sections: ' + ($unknownSections -join ', ')) }
@@ -1841,7 +1927,7 @@ function Restore-POBackup {
     if (-not $PSCmdlet.ShouldProcess($manifest.id, 'Restore recorded Platinum Optimizer changes')) {
         return [pscustomobject]@{ Status = 'SIMULATED'; Message = 'Restore was not executed.'; Restored = @() }
     }
-    $systemSections = @($sections | Where-Object { $_ -in @('power', 'network', 'registry') })
+    $systemSections = @($sections | Where-Object { $_ -in @('power', 'network', 'registry', 'network-tcp', 'network-adapter-power') })
     if ($systemSections.Count -gt 0 -and -not (Test-POIsAdministrator)) { throw 'Restoring system settings requires an elevated Administrator session.' }
     $restored = @(); $failures = @()
     foreach ($section in $sections) {
@@ -1857,6 +1943,14 @@ function Restore-POBackup {
                 'display' {
                     if (-not (Get-Command Restore-PODisplaySection -ErrorAction SilentlyContinue)) { throw 'The Display module is not loaded; the display section cannot be restored in this session.' }
                     Restore-PODisplaySection -BackupPath $fullPath -Manifest $manifest
+                }
+                'network-tcp' {
+                    if (-not (Get-Command Restore-PONetworkTcpSection -ErrorAction SilentlyContinue)) { throw 'The Network module is not loaded; the TCP section cannot be restored in this session.' }
+                    Restore-PONetworkTcpSection -BackupPath $fullPath -Manifest $manifest
+                }
+                'network-adapter-power' {
+                    if (-not (Get-Command Restore-PONetworkAdapterPowerSection -ErrorAction SilentlyContinue)) { throw 'The Network module is not loaded; the adapter-power section cannot be restored in this session.' }
+                    Restore-PONetworkAdapterPowerSection -BackupPath $fullPath -Manifest $manifest
                 }
                 default { throw "No restore handler exists for changed section '$section'; no further sections were attempted." }
             }
@@ -2224,8 +2318,7 @@ function Export-POBackup {
     param([Parameter(Mandatory = $true)][string]$BackupPath,
           [Parameter(Mandatory = $true)][string]$DestinationPath)
     $backupFull = [System.IO.Path]::GetFullPath($BackupPath)
-    $backupRoot = Get-POPathRootPrefix -Path (Get-POBackupRoot)
-    if (-not $backupFull.StartsWith($backupRoot, (Get-POPathComparison))) { throw 'Export is limited to backups inside the Platinum Optimizer backup directory.' }
+    if (-not (Test-POPathInsideBackupRoots -Path $backupFull)) { throw 'Export is limited to backups inside a Platinum Optimizer backup directory.' }
     $validation = Test-POBackup -Path $backupFull
     if (-not $validation.Valid) { throw ('Backup validation failed: ' + (@($validation.Issues) -join '; ')) }
     $destination = [System.IO.Path]::GetFullPath($DestinationPath)
@@ -2246,8 +2339,7 @@ function Remove-POBackup {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param([Parameter(Mandatory = $true)][string]$BackupPath)
     $fullPath = [System.IO.Path]::GetFullPath($BackupPath)
-    $root = Get-POPathRootPrefix -Path (Get-POBackupRoot)
-    if (-not $fullPath.StartsWith($root, (Get-POPathComparison))) { throw 'Delete is limited to backups inside the Platinum Optimizer backup directory.' }
+    if (-not (Test-POPathInsideBackupRoots -Path $fullPath)) { throw 'Delete is limited to backups inside a Platinum Optimizer backup directory.' }
     if (-not (Test-Path -LiteralPath $fullPath -PathType Container)) { throw 'Backup directory does not exist.' }
     $backupItem = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
     if (($backupItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Refusing to delete a backup directory that is a reparse point.' }
@@ -2265,6 +2357,7 @@ Export-ModuleMember -Function @(
     'Get-PONetworkAdapters', 'Get-POCurrentAdapterDns', 'Test-POAdapterDnsEligibility', 'Invoke-PONetworkPingTest', 'Get-POServiceAudit', 'Get-POBcdAudit',
     'Get-POStartupAudit', 'Get-PODriverInventory', 'Get-POScheduledTaskAudit', 'Get-POAppxInventory', 'Get-POInstalledGames', 'Add-POCustomGame', 'Get-POBenchmarkSnapshot',
     'Save-POBenchmarkSnapshot', 'Compare-POBenchmarkSnapshots', 'New-POBackup', 'Test-POBackup', 'Get-POBackups',
+    'Get-POBackupRoot', 'Get-POBackupSearchRoots', 'Test-POPathInsideBackupRoots', 'Add-POBackupFile', 'Get-POBackupSummary',
     'Restore-POBackup', 'Invoke-POProfilePlan', 'Set-PODnsProvider', 'Get-POUserTempPreview', 'Clear-POUserTemp',
     'Get-POResourceSample', 'Open-POWindowsSettings', 'Export-POBackup', 'Remove-POBackup', 'Write-POLog'
 )

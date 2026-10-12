@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Build the single-file release PlatinumOptimizer.bat.
+"""Build the single-file release PlatinumOptimizer.bat (CMD engine v2.0).
 
-The BAT is a cmd/PowerShell polyglot:
-  * cmd.exe sees a normal batch section and never parses the rest.
-  * The batch section launches powershell.exe, which reads this very file,
-    locates the payload marker, and executes the embedded PowerShell.
+The BAT is pure batch up to the payload marker line ``#>PO_PAYLOAD``:
+
+  * cmd.exe executes the batch section (dependency check, administrator
+    detection with UAC self-elevation, engine launch, final pause) and exits
+    via ``exit /b`` before it ever reaches the payload text.
+  * The batch section launches Windows PowerShell, which reads this very
+    file as TEXT, locates the payload marker, and executes the embedded
+    PowerShell payload via a script block.
   * The payload expands every embedded source file (base64, byte-exact)
-    into %LOCALAPPDATA%\\PlatinumOptimizer\\runtime\\<build-id> once, then
-    launches the normal engine script from there.
+    into %LOCALAPPDATA%\\PlatinumOptimizer\\runtime\\<build-id> once per
+    build, then runs the console engine (src/PlatinumOptimizer.ps1).
 
-Everything the app needs (engine, core modules, data JSON, XAML UI, tests)
-is embedded. No separate scripts, downloads, Python, or third-party tools
-are required at runtime; Windows PowerShell 5.1 (built into Windows 10/11
-desktop editions) is the only dependency.
+There is no graphical interface: the Command Prompt console is the entire
+UI. Everything the app needs (engine, core modules, data JSON, tests) is
+embedded. Nothing is downloaded; Windows PowerShell 5.1 (built into
+Windows 10/11 desktop editions) is the only dependency.
 
 Usage:
     python3 tools/build_single_file.py [--check]
@@ -34,6 +38,9 @@ EMBEDDED_FILES = [
     "src/core/PlatinumOptimizer.Power.psm1",
     "src/core/PlatinumOptimizer.Audio.psm1",
     "src/core/PlatinumOptimizer.Display.psm1",
+    "src/core/PlatinumOptimizer.Network.psm1",
+    "src/core/PlatinumOptimizer.Gaming.psm1",
+    "src/core/PlatinumOptimizer.Engine.psm1",
     "src/data/profiles.json",
     "src/data/tweaks.json",
     "src/data/games.json",
@@ -41,36 +48,61 @@ EMBEDDED_FILES = [
     "src/data/power-settings.json",
     "src/data/audio-presets.json",
     "src/data/display-profiles.json",
-    "src/ui/MainWindow.xaml",
     "tests/Run-Tests.ps1",
 ]
 
-BATCH_SECTION = r"""<# : Platinum Optimizer On Steroids - single-file release (batch view)
-@echo off
+BATCH_SECTION = r"""@echo off
+rem ============================================================
+rem  Platinum Optimizer On Steroids v2.0 - automatic CMD engine
+rem  Single-file release. Double-click or right-click and choose
+rem  "Run as administrator": the launcher detects elevation and
+rem  requests it through the normal Windows UAC prompt when needed.
+rem  There is no graphical interface; the console is the UI.
+rem ============================================================
 setlocal EnableExtensions
-title Platinum Optimizer - Platinum On Steroids
+title Platinum Optimizer On Steroids - Automatic Mode
+cd /d "%~dp0"
 where powershell.exe >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Windows PowerShell 5.1 is required to run Platinum Optimizer.
-    pause
-    exit /b 3
-)
-rem Single-file release: the batch section below launches Windows PowerShell,
-rem which reads this file, expands the embedded application into the local
-rem PlatinumOptimizer runtime folder, and runs it. Nothing is downloaded.
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -STA -Command "$env:PO_SELF='%~f0'; $env:PO_ARGS='%*'; $raw=[System.IO.File]::ReadAllText('%~f0',[System.Text.Encoding]::UTF8); $marker='#>'+'PO_PAYLOAD'; $index=$raw.IndexOf($marker); if ($index -lt 0) { Write-Host 'Embedded payload marker missing from this file.'; exit 9 }; $payload=$raw.Substring($index+$marker.Length); & ([scriptblock]::Create($payload)); exit $LASTEXITCODE"
+if not errorlevel 1 goto po_have_powershell
+echo [FAIL] Windows PowerShell 5.1 is required to run Platinum Optimizer.
+echo Press any key to exit...
+pause >nul
+exit /b 3
+:po_have_powershell
+rem Administrator check: "net session" succeeds only in an elevated session.
+net session >nul 2>&1
+if not errorlevel 1 goto po_elevated
+echo [INFO] Administrator privileges are required.
+echo [INFO] Windows will now show a UAC confirmation prompt. This is a
+echo [INFO] normal Windows security mechanism. Select Yes to continue.
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "try { Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs -ErrorAction Stop } catch { exit 123 }"
+if not errorlevel 1 goto po_relaunched
+echo [WARN] Elevation was declined or failed. No privileged changes were made.
+echo Press any key to exit...
+pause >nul
+exit /b 4
+:po_relaunched
+echo [INFO] The elevated optimizer was started in a new window.
+timeout /t 3 >nul
+exit /b 0
+:po_elevated
+rem The batch section launches Windows PowerShell, which reads this file as
+rem text, expands the embedded application into the local PlatinumOptimizer
+rem runtime folder, and runs the automatic engine. Nothing is downloaded.
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$env:PO_SELF='%~f0'; $env:PO_ARGS='%*'; $raw=[System.IO.File]::ReadAllText('%~f0',[System.Text.Encoding]::UTF8); $marker='#>'+'PO_PAYLOAD'; $index=$raw.IndexOf($marker); if ($index -lt 0) { Write-Host 'Embedded payload marker missing from this file.'; exit 9 }; $payload=$raw.Substring($index+$marker.Length); & ([scriptblock]::Create($payload)); exit $LASTEXITCODE"
 set "RESULT=%ERRORLEVEL%"
-if not "%RESULT%"=="0" (
-    echo.
-    echo Platinum Optimizer exited with code %RESULT%.
-    pause
-)
+echo.
+if "%RESULT%"=="0" goto po_done
+echo Platinum Optimizer exited with code %RESULT%.
+:po_done
+echo Press any key to exit...
+pause >nul
 exit /b %RESULT%
 #>PO_PAYLOAD
 """
 
 PAYLOAD_TEMPLATE = r"""
-# Platinum Optimizer On Steroids - embedded application payload.
+# Platinum Optimizer On Steroids - embedded application payload (CMD engine).
 # Generated by tools/build_single_file.py - do not edit by hand.
 # All files below are byte-exact base64 copies of the repository sources.
 $ErrorActionPreference = 'Stop'
@@ -97,13 +129,41 @@ __EXPAND_CALLS__
 
 $script:POEnginePath = Join-Path $script:PORuntimeDir 'src\PlatinumOptimizer.ps1'
 if (-not (Test-Path -LiteralPath $script:POEnginePath -PathType Leaf)) {
-    Write-Host 'The embedded engine could not be expanded; delete the runtime folder and retry:' -ForegroundColor Red
+    Write-Host '[FAIL] The embedded engine could not be expanded; delete the runtime folder and retry:' -ForegroundColor Red
     Write-Host ("  " + $script:PORuntimeDir) -ForegroundColor Red
     exit 8
 }
+
+# Map launcher arguments onto the console engine. Default (no arguments) is
+# the fully automatic optimization run - there is no interactive menu.
 $script:POArgTokens = @(($env:PO_ARGS -split '\s+') | Where-Object { $_ })
-if ($script:POArgTokens -contains '-Scan') { & $script:POEnginePath -Scan; exit $LASTEXITCODE }
 if ($script:POArgTokens -contains '-SelfTest') { & (Join-Path $script:PORuntimeDir 'tests\Run-Tests.ps1'); exit $LASTEXITCODE }
+$script:POScan = $false
+$script:POEngineArgs = New-Object System.Collections.Generic.List[string]
+for ($script:POArgIndex = 0; $script:POArgIndex -lt $script:POArgTokens.Count; $script:POArgIndex++) {
+    $token = $script:POArgTokens[$script:POArgIndex]
+    switch ($token.ToLowerInvariant()) {
+        '-scan' { $script:POScan = $true }
+        '--restore' {
+            [void]$script:POEngineArgs.Add('-Restore')
+            if ((($script:POArgIndex + 1) -lt $script:POArgTokens.Count) -and ($script:POArgTokens[$script:POArgIndex + 1] -notmatch '^-')) {
+                $script:POArgIndex++
+                [void]$script:POEngineArgs.Add('-RestoreId')
+                [void]$script:POEngineArgs.Add($script:POArgTokens[$script:POArgIndex])
+            }
+        }
+        '--benchmark' { [void]$script:POEngineArgs.Add('-Benchmark') }
+        '--target' { [void]$script:POEngineArgs.Add('-Target') }
+        '--restoreid' { [void]$script:POEngineArgs.Add('-RestoreId') }
+        default { [void]$script:POEngineArgs.Add($token) }
+    }
+}
+if ($script:POScan) { & $script:POEnginePath -Scan; exit $LASTEXITCODE }
+if ($script:POEngineArgs.Count -gt 0) {
+    $script:POEngineArgArray = $script:POEngineArgs.ToArray()
+    & $script:POEnginePath @script:POEngineArgArray
+    exit $LASTEXITCODE
+}
 & $script:POEnginePath
 exit $LASTEXITCODE
 """
@@ -139,6 +199,8 @@ def extract_and_check(bat_path: Path, verbose: bool = True) -> bool:
         raise AssertionError("payload marker must appear exactly once (found %d)" % text.count(marker))
     batch_part = text.split(marker, 1)[0]
     batch_part.encode("ascii")  # raises if the batch section is not ASCII
+    if text.splitlines()[0].strip() != "@echo off":
+        raise AssertionError("batch section must start with @echo off")
     payload = text.split(marker, 1)[1]
     ok = True
     for rel in EMBEDDED_FILES:
@@ -155,8 +217,6 @@ def extract_and_check(bat_path: Path, verbose: bool = True) -> bool:
             print("  %-52s %s (%d bytes)" % (rel, "OK" if match else "MISMATCH", len(decoded)))
         if not match:
             ok = False
-    if "<# :" not in text.splitlines()[0]:
-        raise AssertionError("polyglot header line is malformed")
     return ok
 
 

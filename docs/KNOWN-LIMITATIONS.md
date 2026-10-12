@@ -1,51 +1,49 @@
-# Known limitations and validation status
+# Known limitations and validation status (v2.0 CMD engine)
 
 ## Environment validation
 
-- The available development workspace is Linux. Windows PowerShell 5.1, WPF, `powercfg.exe`, CIM Windows providers, `Set-DnsClientServerAddress`, UAC, and Windows 10/11 are not available here.
-- The new WPF app and Windows-specific core therefore cannot be launched or integration-tested in this environment. No Windows 10/11 result is claimed. Run `tests/Run-Tests.ps1` on Windows PowerShell 5.1, then complete the manual checks below before release.
-- The legacy batch source was read completely, archived as inert text, statically inventoried, and not executed.
+- The development workspace is Linux. Windows PowerShell 5.1, `powercfg.exe`, `netsh.exe`, CIM Windows providers, UAC, `Checkpoint-Computer`, and Windows 10/11 are not available here.
+- The console engine and Windows-specific core therefore cannot be launched or integration-tested in this environment. No Windows 10/11 result is claimed. Run `tests/Run-Tests.ps1` on Windows PowerShell 5.1, then complete the manual checklist below before release.
+- Structural gates that DO run here: `tools/ps_syntax_sanity.py`, `tools/build_single_file.py --check` (byte-exact embedded payload), and `tools/audit_legacy.py`.
+- The legacy V9.3 batch source was read completely, archived as inert text, statically inventoried, and is not executed by any launcher.
 
 ## Detection gaps are explicit
 
-- The OS gate identifies Windows 10/11 family and reports the build, but does not verify update health, ESU/LTSC enrollment, domain policy, or organizational servicing status. As of 2026-10-04, the ordinary Windows 10 servicing lifecycle has passed its 2025-10-14 end-of-support date; the UI therefore labels the servicing lifecycle Unknown rather than implying that every Windows 10 installation is currently supported.
-- Windows generic CIM/WMI does not consistently expose CPU P-core/E-core topology, processor generation, NUMA topology, memory channels, compression, reliable GPU VRAM/shared memory, per-display refresh/HDR/color depth, NVMe health/temperature, CPU/GPU temperatures, or thermal throttling state. The UI shows Unknown/Not exposed and does not infer vendor settings from model text.
-- Generic WMI counters can be absent or localized/inconsistent. Missing samples remain unavailable; the app does not translate absent values to zero.
-- `Win32_VideoController.AdapterRAM` can be firmware/provider-reported and may be limited or inaccurate. It is labelled reported, never used to set VRAM allocation.
-- Exact per-driver DPC/ISR latency requires a reliable ETW trace or specialist diagnostic source. This application does not currently collect a WPR/xperf trace and does not claim that DPC-time percentage is latency.
-- GPU usage, FPS, frame time, 1% lows, game-server route latency, and thermals are not collected by this build. No game process is injected or inspected.
+- The OS gate identifies the Windows 10/11 family and reports the build, but does not verify update health, ESU/LTSC enrollment, domain policy, or organizational servicing status; the servicing lifecycle is reported Unknown.
+- Generic CIM/WMI does not consistently expose hybrid P/E-core topology, processor generation, NUMA details, memory channels, memory compression, reliable GPU VRAM/shared memory, per-display HDR/color depth, NVMe health, temperatures, or thermal throttling. The engine prints Unknown/Not exposed and never infers settings from model text.
+- Generic counters can be absent or localized. Missing samples remain unavailable; absent values are never translated to zero.
+- `netsh int tcp show global` labels are localized on non-English Windows; the engine therefore prefers `Get-NetTCPSetting` (language-neutral enums) and treats an unrecognizable netsh output as "unavailable" (documented skip), never as a default.
+- GPU usage, FPS, frame time, 1% lows, game-server route latency, and thermals are not collected. No game process is injected or inspected. `--benchmark` samples only documented Windows counters and optional user-chosen ICMP.
 
-## Feature boundaries
+## Feature boundaries (v2.0)
 
-- The profile engine changes only the active GUID of an already-installed Windows plan; it does not tune per-AC/DC subsettings, CPU boost, core parking, GPU clocks, HAGS, service state, or sleep values. The built-in plan may be absent on some OEM/laptop configurations; the plan is skipped.
-- Network resolver changes only IPv4 on one connected physical adapter after both DHCP address assignment and the absence of a per-interface static IPv4 DNS override are confirmed. Static IP/DNS, VPN/virtual interfaces, policy-managed configuration, IPv6 DNS, and other adapters are not changed. An unknown DNS mode is blocked. A selected adapter can disconnect or become policy-managed between preview and apply; failures are reported and rollback is attempted.
-- A DNS restore uses `-ResetServerAddresses` because the app only permits changes when the captured configuration was verified as DHCP plus automatic DNS. It restores automatic/DHCP behavior, not an arbitrary static or VPN configuration.
-- Game discovery is local and metadata-based. Steam/Epic manifests, AppX inventory, and uninstall registrations are supported hints; some launchers/games are not visible, and detected install paths must be reviewed. The ARC Raiders executable candidate is intentionally blank until verified against the installed build.
-- AppX removal and one-click service/task/startup changes are deliberately not implemented. Reliable reversibility and per-machine dependency analysis are prerequisites; the current views are read-only.
-- Temp cleanup is irreversible. It is age- and path-restricted and opt-in; it is not backed up or presented as a performance tweak.
-- Restore can only undo operations recorded by Platinum Optimizer. It cannot recover unrecorded user changes, removed data from the archived V9.3 script, or a whole Windows installation.
-- Backup ZIP exports are not encrypted. Local DNS/service/system metadata may be sensitive.
+- **Automatic scope:** the default run changes only: (1) the `Platinum On Steroids` power plan and its activation, (2) four allowlisted HKCU gaming registry values, (3) TCP autotuning/RSS **only when below documented Windows defaults**, (4) wired-adapter "allow computer to turn off device" **only when not on battery**, and (5) a DNS cache flush. Everything else is assessed and reported read-only.
+- **Power plan:** created from the High Performance scheme via `powercfg /duplicatescheme` or reused by GUID. Policy-restricted platforms may reject creation; the failure is reported and the previous plan stays active. Boost policy and core-parking settings exist only where the platform exposes them; elsewhere they are skipped (NOT_SUPPORTED), never forced — on some AMD/Intel generations core parking remains under Windows' internal control. The plan's effect on frame pacing is not measured by this application.
+- **Gaming settings:** Game DVR/App-capture registry changes may require sign-out or reboot to fully apply; the report flags this. The Xbox Game Bar app, Defender, Firewall, Windows Update, services, scheduled tasks, startup entries, and processes are never disabled, stopped, or terminated.
+- **Network:** ECN, TCP timestamps, RSC, congestion provider, and offload features are deliberately report-only — their benefit is hardware/driver/workload dependent. DNS servers, speed/duplex, network identity, and firewall are never changed; no `netsh reset` is ever run. Ping depends on ISP, routing, congestion, server location, and the game server; no latency improvement is promised.
+- **Display/GPU:** refresh rate and resolution are never changed automatically (an unsupported rate can blank the screen); the engine reports the highest enumerated refresh at the current resolution as a recommendation. Vendor saturation/vibrance has no documented write API here, so color changes remain manual guidance; third-party color software (e.g., PlexusX) is never touched. Gamma profiles from v1.x are still restorable from old backups but are not applied by the automatic run. DDC/CI is probed read-only.
+- **Storage/memory:** temp-file inventory is reported but never auto-deleted (deletion is irreversible); the page file, memory compression, SysMain, and Windows Search are untouched.
+- **Restore** can only undo operations recorded by Platinum Optimizer (validated manifest, checksums, allowlists). It cannot recover unrecorded user changes or a whole Windows installation. A System Restore point, when creation succeeded, is supplemental.
+- Backup ZIP exports (v1.x feature) are unencrypted and may contain local system metadata.
 
-## Module limits introduced in 1.1
+## Launcher boundaries
 
-- **Power plan:** the Platinum On Steroids plan is created from the High Performance scheme with `powercfg /duplicatescheme`. Platforms where `powercfg` is policy-restricted may reject plan creation; the workflow then reports the failure and leaves the previous plan active. Boost policy and core-parking settings exist only where the processor platform exposes them; they are skipped (never forced) elsewhere, which means on some AMD/Intel generations core parking remains under Windows' internal control. The plan's effect on actual frame pacing is not measured by this application.
-- **Audio:** Windows exposes no documented PowerShell interface for default endpoint selection, per-endpoint sample rate, enhancement toggles, exclusive-mode flags, or spatial-audio state, so those fields are reported as Unknown with a pointer to the supported UI. The module therefore changes exactly one fully verifiable value (communications ducking). It does not measure or claim audio latency improvements. Bluetooth codec negotiation and headset-suite virtualizers are outside every documented interface and remain manual.
-- **Display:** gamma ramps set via `SetDeviceGammaRamp` are session-scoped; some drivers reset them on mode switches, HDR enablement, or fast startup, and under HDR they are typically ignored — the module detects read-back mismatches and reports failure rather than claiming success. HDR state itself is not exposed by the APIs used, so the HDR Gaming profile is guidance-only. DDC/CI is probed read-only (capabilities string length) and a negative result can mean a disabled monitor setting rather than absent hardware. Monitor OSD controls (hardware brightness/contrast/color temperature) are never adjusted. Vendor saturation/vibrance is manual-only because no documented write API exists; any manual vendor change must also be reverted manually.
-- **Single-file release:** `PlatinumOptimizer.bat` expands embedded sources into `%LOCALAPPDATA%\PlatinumOptimizer\runtime\<build-id>` on first run per build; deleting that folder is the documented recovery for a corrupted expansion. An administrator-elevated restart launched from the extracted runtime runs the extracted engine directly (documented behavior, not a bug).
+- Elevation uses the standard Windows UAC prompt (`Start-Process -Verb RunAs`). Declining elevation exits with code 4 and changes nothing. The elevated instance runs in its own console window; the original window closes after a short notice.
+- Argument passing through the BAT uses `%*`; documented arguments are simple flags (`--restore`, `--benchmark`, `--target <host>`, `-Scan`, `-SelfTest`). Arguments containing quotes or spaces are not supported by the launcher.
+- `PlatinumOptimizer.bat` expands embedded sources into `%LOCALAPPDATA%\PlatinumOptimizer\runtime\<build-id>` once per build; deleting that folder is the documented recovery for a corrupted expansion. The batch section is pure ASCII so any cmd code page can parse it.
+- No scheduled task, service, startup entry, or background process is created. The optimizer is a foreground process that exits when finished.
 
 ## Manual Windows release checklist
 
-1. Run the PowerShell test harness in a standard user session and elevated session.
-2. Launch `Platinum+Optimizer.V9.3.FREE.cmd` on a clean Windows 10 build and a clean Windows 11 build; confirm it launches the new UI and never executes the archived batch content.
-3. Verify standard-user detection, Settings links, game/app inventory, and that preview/dry run create no backup and do not change power/DNS/registry/services/BCD.
-4. On a disposable test PC/VM, elevate intentionally; test existing-plan switch, active-GUID verification, timestamped backup, restore, and an injected failure/rollback case.
-5. Verify DNS change/restore only on a disposable DHCP-enabled physical adapter; test cancellation, invalid custom IPv4, disconnected adapter, and failure rollback. Do not test on a managed production VPN/network.
-6. Verify backup checksum rejection after modifying a snapshot file, export warning, restore scope, and backup deletion path guard.
-7. Check AppX, service, task, startup, security, BCD, and driver pages remain read-only.
-8. Check high-performance plans are blocked on battery, unknown power source, and unknown form factor; maximum mode requires the separate warning confirmation.
-9. Confirm no background sampling unless monitoring is enabled and no automatic reboot occurs.
-10. Review Windows Event Viewer, Defender, Windows Update, Store, Bluetooth, audio, USB/controller, VPN, and sleep/resume behavior after the change/restore cycle.
-11. Platinum On Steroids: create the plan, verify no duplicate is created on a second run, apply each preset, verify skipped settings are reported on machines without core parking/boost exposure, activate, confirm the active GUID, restore the previous plan, and re-activate. Verify existing user plans survive the whole cycle.
-12. Audio: apply a preset, verify the ducking value round-trips, restore original audio settings, and confirm the microphone and default devices are untouched. Test with a USB headset, a Bluetooth headset, and a disconnected-device state.
-13. Display: on a single- and multi-monitor system, apply a gamma profile to one display and confirm the other display is untouched; verify restore returns the captured mode/ramp; test refresh change on a high-refresh panel and on a 60 Hz panel (no-op); test with HDR enabled (expect an honest failure for gamma).
-14. Run `PlatinumOptimizer.bat` from a clean profile: verify expansion, UI launch, `-Scan`, `-SelfTest`, and re-run reuse of the runtime directory.
+1. Run `tests\Run-Tests.ps1` (or `PlatinumOptimizer.bat -SelfTest`) in a standard-user and an elevated session; all assertions must pass.
+2. Double-click `PlatinumOptimizer.bat` on a clean Windows 10 and a clean Windows 11 build: confirm the UAC prompt appears, the elevated console runs automatically with no menu, and the report matches the actual system state.
+3. Decline the UAC prompt: confirm exit code 4, the explanatory message, and that nothing changed.
+4. On a disposable PC/VM: verify the `Platinum On Steroids` plan is created, activated (active GUID re-read), and that a **second run reuses the same GUID** without creating a duplicate and reports "already optimized" for unchanged settings.
+5. Verify `%ProgramData%\PlatinumOptimizer\Backups\Backup_*` exists with a valid manifest, that `run.log` and `report.json` exist per run, and that previous runs' logs are not overwritten.
+6. Run `--restore`: confirm the previous power plan is reactivated, the four registry values return to their captured state, TCP/adapter changes revert, and the Platinum plan itself is not deleted.
+7. Test a laptop on battery (plan change must skip with a reason) and on AC (Laptop preset applies).
+8. Test a machine with autotuning `normal` (no TCP change) and one with autotuning disabled (corrected to normal and verified). Confirm ECN/timestamps/RSC are never modified.
+9. Tamper with a backup snapshot file and confirm restore refuses it (checksum validation).
+10. Confirm Defender, Firewall, Windows Update, services, startup entries, and running processes are unchanged after a full run.
+11. Verify `-Scan` and `--benchmark` run without elevation and change nothing; `--benchmark --target <reachable host>` records ICMP honestly.
+12. Check console rendering on a legacy OEM code page (e.g., 437/850) and on Windows Terminal.

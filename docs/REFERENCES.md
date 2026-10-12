@@ -36,6 +36,20 @@ These sources justify the limited supported integrations used by Platinum Optimi
 16. **Windows Color Management** — ICC profile associations are read from the documented Windows Color Management association location and surfaced with `colorcpl.exe` as the supported management UI; no profile is installed or forced.
     <https://learn.microsoft.com/en-us/windows/win32/wcs/windows-color-system>
 
+## Added in v2.0 (automatic CMD engine)
+
+17. **TCP global state** — Microsoft PowerShell *NetTCPIP* module: `Get-NetTCPSetting -SettingStore Active` reports receive-window autotuning level (local/effective), ECN capability, timestamps, congestion provider, RSS state, initial RTO, and retransmission values with language-neutral enums; `netsh int tcp show global` / `netsh int tcp set global` is the documented command-line surface. The engine only restores autotuning to the documented default (`normal`) when it is below default, and only enables RSS when it is disabled on a multi-processor system; ECN/timestamps/RSC/congestion provider are reported, never flipped.
+    <https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpsetting> ·
+    <https://learn.microsoft.com/en-us/windows-server/networking/technologies/netsh/netsh-interface-tcp>
+18. **Adapter power management** — Microsoft PowerShell *NetAdapter* module: `Get-NetAdapterPowerManagement` / `Set-NetAdapterPowerManagement` are the documented interface for the "Allow the computer to turn off this device to save power" control. Only connected physical wired adapters are changed, previous values are captured, and every write is verified by re-reading.
+    <https://learn.microsoft.com/en-us/powershell/module/netadapter/set-netadapterpowermanagement>
+19. **System Restore point** — Microsoft PowerShell, *Checkpoint-Computer* (and the `SystemRestoreConfig` WMI class for availability): a restore point is attempted only when System Restore is not reported disabled, the call is time-bounded, and the result is reported truthfully. It is supplemental protection — the checksum-verified configuration backup is the primary restore path.
+    <https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/checkpoint-computer>
+20. **Game capture / Game DVR settings** — Microsoft Support, *Record game clips on your PC with Game Bar*: documents background recording and the Settings > Gaming > Captures surface. The engine writes only the same user-scope switches that surface manages (`AppCaptureEnabled`, `GameDVR_Enabled`) plus the documented Game Mode values, each captured-before/verified-after and restorable; the Game Bar app itself stays installed and enabled.
+    <https://support.microsoft.com/en-us/windows/record-game-clips-on-your-pc-with-game-bar-2ed42714-8bdd-34f3-4b6d-cab7d4d9bce7>
+21. **Hardware-accelerated GPU scheduling** — Microsoft Support/Windows documentation for HAGS in Settings > System > Display > Graphics. Support depends on GPU and driver; enabling requires a reboot. The engine only reports the documented `HwSchMode` state and recommends the supported Settings surface — it never writes the value.
+    <https://support.microsoft.com/en-us/windows/how-to-enable-hardware-accelerated-gpu-scheduling-in-windows-11-a2db51b8-2be5-4d51-8d08-8f5fbd1a4b6d>
+
 ## Interpretation policy
 
 - A Microsoft WMI property is an inventory surface, not a guarantee that every OEM populates it accurately.
