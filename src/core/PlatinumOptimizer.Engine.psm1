@@ -1178,7 +1178,10 @@ function Invoke-POGamingStage {
     $results = New-Object System.Collections.Generic.List[psobject]
     Write-POStageHeader -Name 'GAMING' -Title 'WINDOWS GAMING AND BACKGROUND CONFIGURATION'
 
-    if (-not (Get-Command Invoke-POGamingOptimization -ErrorAction SilentlyContinue)) {
+    # The Gaming module owns the policy table (which values and why); this
+    # stage owns the execution contract. Without the module there is no policy
+    # to apply, so nothing is inspected rather than guessed.
+    if (-not ((Get-Command Get-POGamingSettingTargets -ErrorAction SilentlyContinue) -and (Get-Command Get-POGamingSettingsState -ErrorAction SilentlyContinue))) {
         $rec = New-POResultRecord -Stage 'GAMING' -Id 'gaming-module' -Status 'SKIPPED' -Message 'Gaming module not loaded; no gaming setting was inspected.' -Inspected $false -Reason 'PlatinumOptimizer.Gaming is not imported.'
         $results.Add($rec); Write-POResultToConsole -Result $rec
         return $results.ToArray()
