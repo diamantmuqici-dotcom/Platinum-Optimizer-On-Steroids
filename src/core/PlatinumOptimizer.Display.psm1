@@ -203,7 +203,7 @@ function Set-PODisplayModuleState {
     Write-POJsonAtomic -Path (Get-PODisplayStatePath) -Object $State
 }
 
-function Compute-POGammaRamp {
+function New-POGammaRamp {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][double]$Gamma)
     # Pure function. ALWAYS computed from the identity curve. Identical for
@@ -662,7 +662,7 @@ function Invoke-PODisplayProfile {
     Add-POBackupChange -BackupPath $backup.Path -Section display -Change $changeRecord
     try {
         if ($null -ne $gammaValue) {
-            $ramp = Compute-POGammaRamp -Gamma $gammaValue
+            $ramp = New-POGammaRamp -Gamma $gammaValue
             Set-PODisplayRampInternal -DeviceName $DeviceName -ChannelValues $ramp.Red
         }
         if ($targetFrequency -ne [int]$currentMode.DisplayFrequency) {
@@ -767,7 +767,7 @@ function Restore-PODisplaySection {
     }
     $currentMatchesExpectedRamp = $rampAlreadyOriginal
     if ($gammaProperty -and $null -ne $gammaProperty.Value) {
-        $targetRamp = Compute-POGammaRamp -Gamma ([double]$gammaProperty.Value)
+        $targetRamp = New-POGammaRamp -Gamma ([double]$gammaProperty.Value)
         $currentMatchesExpectedRamp = (Compare-POGammaRamps -Expected ([int[]]@($targetRamp.Red)) -Actual ([int[]]@($currentRamp.Red)) -Tolerance 512) -and (Compare-POGammaRamps -Expected ([int[]]@($targetRamp.Green)) -Actual ([int[]]@($currentRamp.Green)) -Tolerance 512) -and (Compare-POGammaRamps -Expected ([int[]]@($targetRamp.Blue)) -Actual ([int[]]@($currentRamp.Blue)) -Tolerance 512)
     }
     if (-not $rampAlreadyOriginal -and -not $currentMatchesExpectedRamp) { throw 'The current display gamma ramp changed after Platinum Optimizer ran; refusing to overwrite the newer color choice.' }
@@ -788,6 +788,6 @@ function Restore-PODisplaySection {
 
 Export-ModuleMember -Function @(
     'Get-PODisplayProfileCatalog', 'Get-PODisplayProfiles', 'Get-PODisplayInventory', 'Get-PODisplayModuleState',
-    'Compute-POGammaRamp', 'Compare-POGammaRamps', 'Select-POHighestRefresh', 'Test-PODdcCiAvailability', 'Get-POGpuColorControlStatus',
+    'New-POGammaRamp', 'Compare-POGammaRamps', 'Select-POHighestRefresh', 'Test-PODdcCiAvailability', 'Get-POGpuColorControlStatus',
     'Invoke-PODisplayProfile', 'Restore-PODisplayConfiguration', 'Restore-PODisplaySection', 'Get-PODisplayLiveStateSnapshot'
 )

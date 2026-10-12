@@ -128,11 +128,35 @@ class CliContractTests(unittest.TestCase):
         self.assertIn("[POWER VERIFIED]", power)
         self.assertIn("Label = 'APPLIED / VERIFIED'", automatic)
 
-    def test_current_console_banner_identifies_patch_release(self) -> None:
+    def test_console_banner_renders_the_current_application_version(self) -> None:
         engine = (ROOT / "src/PlatinumOptimizer.ps1").read_text(encoding="utf-8")
-        self.assertIn("$script:POApplicationVersion = '2.0.2'", engine)
-        self.assertIn("VERSION 2.0.2", engine)
-        self.assertIn("-DisableNameChecking", engine)
+        match = re.search(r"\$script:POApplicationVersion = '([^']+)'", engine)
+        self.assertIsNotNone(match, "the entry point must declare an application version")
+        version = match.group(1)
+        # The banner must render the declared version rather than a hardcoded
+        # string, so the two can never drift apart between releases.
+        self.assertIn("-f $script:POApplicationVersion", engine)
+        self.assertNotIn("VERSION 2.0.2", engine)
+
+    def test_module_import_warnings_are_not_suppressed(self) -> None:
+        """v2.0.2 added -DisableNameChecking to hide the unapproved-verb
+        warning. The cause (Compute-POGammaRamp) is renamed to New-POGammaRamp,
+        so the suppression is no longer justified and would hide real errors.
+        """
+        for name in ("src/PlatinumOptimizer.ps1", "tests/Run-Tests.ps1"):
+            with self.subTest(file=name):
+                # Only real Import-Module statements matter; the rationale is
+                # documented in a comment that legitimately names the flag.
+                imports = [
+                    line
+                    for line in (ROOT / name).read_text(encoding="utf-8").splitlines()
+                    if "Import-Module" in line and not line.lstrip().startswith("#")
+                ]
+                self.assertTrue(imports, f"{name} must import the optimizer modules")
+                self.assertFalse(
+                    [line for line in imports if "-DisableNameChecking" in line],
+                    f"{name} must not suppress module name-checking warnings",
+                )
 
     def test_windows_process_arguments_are_quoted_without_literal_escape_slashes(self) -> None:
         core = (ROOT / "src/core/PlatinumOptimizer.Core.psm1").read_text(encoding="utf-8")

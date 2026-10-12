@@ -878,7 +878,16 @@ function Invoke-POAutomaticMode {
           [AllowNull()][string]$BackupPath,
           [Parameter(Mandatory = $true)][string]$ApplicationVersion)
     switch ($Mode) {
-        'Auto' { return (Invoke-POAutomaticOptimization -ApplicationVersion $ApplicationVersion) }
+        'Auto' {
+            # The detailed staged engine lives in PlatinumOptimizer.Engine and
+            # covers every category. If it is loaded it owns the automatic run;
+            # the power-only path below is retained only as a fallback for a
+            # session where the Engine module could not be imported.
+            if (Get-Command Invoke-POFullOptimization -ErrorAction SilentlyContinue) {
+                return (Invoke-POFullOptimization)
+            }
+            return (Invoke-POAutomaticOptimization -ApplicationVersion $ApplicationVersion)
+        }
         'Restore' { return (Invoke-POAutomaticRestore -ApplicationVersion $ApplicationVersion -BackupPath $BackupPath) }
         { $_ -in @('Scan', 'Benchmark') } { return (Invoke-POAutomaticReadOnlyMode -Mode $Mode -ApplicationVersion $ApplicationVersion) }
         default { throw "Unsupported automatic mode: $Mode" }

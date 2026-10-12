@@ -1818,7 +1818,7 @@ function Test-POBackupNeedsRestore {
 function Add-POBackupChange {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$BackupPath,
-          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display')][string]$Section,
+          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display', 'network-tcp', 'network-adapter-power')][string]$Section,
           [Parameter(Mandatory = $true)][psobject]$Change)
     $manifestPath = Join-Path $BackupPath 'manifest.json'
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
@@ -1834,7 +1834,7 @@ function Add-POBackupChange {
 function Update-POBackupChangeStatus {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$BackupPath,
-          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display')][string]$Section,
+          [Parameter(Mandatory = $true)][ValidateSet('power', 'network', 'registry', 'audio', 'display', 'network-tcp', 'network-adapter-power')][string]$Section,
           [Parameter(Mandatory = $true)][string]$Status,
           [string]$Message = '',
           [AllowNull()][string[]]$AfterIPv4,
@@ -1863,6 +1863,47 @@ function Update-POBackupChangeStatus {
     }
     $manifest.changes = $changes
     Write-POJsonAtomic -Path $manifestPath -Object $manifest
+}
+
+function Add-POBackupFile {
+    # Writes an additional snapshot file into an existing backup directory and
+    # registers it in the manifest checksum inventory, so Test-POBackup stays
+    # valid. Required by change stages that capture their before-state after the
+    # backup skeleton was created (TCP global state, adapter power settings).
+    # This function was removed in the v2.0.1 rewrite and restored for v2.1
+    # because PlatinumOptimizer.Network.psm1 depends on it: without it the
+    # network stage throws on every run.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$BackupPath,
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content
+    )
+    $manifestPath = Join-Path $BackupPath 'manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Backup manifest is missing: $manifestPath" }
+    if ([string]::IsNullOrWhiteSpace($RelativePath)) { throw 'RelativePath must not be empty.' }
+    if ([System.IO.Path]::IsPathRooted($RelativePath)) { throw 'RelativePath must be a backup-relative path.' }
+    $rootFull = [System.IO.Path]::GetFullPath($BackupPath)
+    $target = [System.IO.Path]::GetFullPath((Join-Path $rootFull $RelativePath))
+    $rootPrefix = Get-POPathRootPrefix -Path $rootFull
+    if (-not $target.StartsWith($rootPrefix, (Get-POPathComparison))) { throw 'Backup file target is outside the backup directory.' }
+    if ($target.Equals([System.IO.Path]::GetFullPath($manifestPath), (Get-POPathComparison))) { throw 'The manifest cannot be overwritten through Add-POBackupFile.' }
+    $parent = Split-Path -Parent $target
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    Set-Content -LiteralPath $target -Value $Content -Encoding UTF8
+    $file = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+    $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256 -ErrorAction Stop).Hash
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    $files = @($manifest.files)
+    $entry = [pscustomobject][ordered]@{ Path = $RelativePath; Length = [long]$file.Length; SHA256 = $hash }
+    $replaced = $false
+    for ($i = 0; $i -lt $files.Count; $i++) {
+        if ($null -ne $files[$i] -and $files[$i].PSObject.Properties['Path'] -and [string]$files[$i].Path -eq $RelativePath) { $files[$i] = $entry; $replaced = $true; break }
+    }
+    if (-not $replaced) { $files += $entry }
+    $manifest.files = $files
+    Write-POJsonAtomic -Path $manifestPath -Object $manifest
+    return [pscustomobject][ordered]@{ Path = $target; RelativePath = $RelativePath; Length = [long]$file.Length; SHA256 = $hash }
 }
 
 function Set-POActivePowerPlan {
@@ -2125,7 +2166,10 @@ function Restore-POBackup {
     $validation = Test-POBackup -Path $fullPath
     if (-not $validation.Valid) { throw ('Backup validation failed: ' + (@($validation.Issues) -join '; ')) }
     $manifest = $validation.Manifest
-    $allowedSections = @('power', 'network', 'registry', 'audio', 'display')
+    # 'network-tcp' and 'network-adapter-power' are the Network module's
+    # ledger sections. They were dropped from this allowlist in the v2.0.1
+    # rewrite, which made every backup written by the network stage unrestorable.
+    $allowedSections = @('power', 'network', 'registry', 'audio', 'display', 'network-tcp', 'network-adapter-power')
     $sections = @($manifest.modifiedSections | Select-Object -Unique)
     $unknownSections = @($sections | Where-Object { $_ -notin $allowedSections })
     if ($unknownSections.Count -gt 0) { throw ('Backup contains unsupported restore sections: ' + ($unknownSections -join ', ')) }
@@ -2148,7 +2192,7 @@ function Restore-POBackup {
     if (-not $PSCmdlet.ShouldProcess($manifest.id, 'Restore pending recorded Platinum Optimizer changes')) {
         return [pscustomobject]@{ Status = 'SIMULATED'; Message = 'Restore was not executed.'; Restored = @(); Failures = @(); UnverifiedSections = @() }
     }
-    $systemSections = @($sections | Where-Object { $_ -in @('power', 'network', 'registry') })
+    $systemSections = @($sections | Where-Object { $_ -in @('power', 'network', 'registry', 'network-tcp', 'network-adapter-power') })
     if ($systemSections.Count -gt 0 -and -not (Test-POIsAdministrator)) { throw 'Restoring system settings requires an elevated Administrator session.' }
     $restored = @(); $failures = @(); $unverifiedSections = @()
     foreach ($section in $sections) {
@@ -2164,6 +2208,14 @@ function Restore-POBackup {
                 'display' {
                     if (-not (Get-Command Restore-PODisplaySection -ErrorAction SilentlyContinue)) { throw 'The Display module is not loaded; the display section cannot be restored in this session.' }
                     Restore-PODisplaySection -BackupPath $fullPath -Manifest $manifest
+                }
+                'network-tcp' {
+                    if (-not (Get-Command Restore-PONetworkTcpSection -ErrorAction SilentlyContinue)) { throw 'The Network module is not loaded; the TCP section cannot be restored in this session.' }
+                    Restore-PONetworkTcpSection -BackupPath $fullPath -Manifest $manifest
+                }
+                'network-adapter-power' {
+                    if (-not (Get-Command Restore-PONetworkAdapterPowerSection -ErrorAction SilentlyContinue)) { throw 'The Network module is not loaded; the adapter-power section cannot be restored in this session.' }
+                    Restore-PONetworkAdapterPowerSection -BackupPath $fullPath -Manifest $manifest
                 }
                 default { throw "No restore handler exists for changed section '$section'; no further sections were attempted." }
             }
@@ -2568,7 +2620,7 @@ Export-ModuleMember -Function @(
     'Get-POStateRoot', 'Get-POJsonFile', 'Get-POProfileCatalog', 'Get-POTweakCatalog', 'Get-POGameCatalog', 'Get-POServiceCatalog',
     'Test-POIsWindows', 'Test-POIsAdministrator', 'Invoke-POExternalCommand', 'Get-POSystemSnapshot', 'Get-POStatusSnapshot', 'Get-POPowerPlans',
     'Get-PORegValueState', 'Set-PORegValueState', 'Test-POIPv4DnsAddresses',
-    'Write-POJsonAtomic', 'Add-POBackupChange', 'Update-POBackupChangeStatus', 'Set-POActivePowerPlan',
+    'Write-POJsonAtomic', 'Add-POBackupChange', 'Update-POBackupChangeStatus', 'Add-POBackupFile', 'Set-POActivePowerPlan',
     'Get-POActivePowerPlanGuid', 'Get-POBuiltinPlanGuid', 'Get-POProfiles', 'Get-POTweakCompatibility', 'New-POProfilePlan',
     'Get-PONetworkAdapters', 'Get-POCurrentAdapterDns', 'Test-POAdapterDnsEligibility', 'Invoke-PONetworkPingTest', 'Get-POServiceAudit', 'Get-POBcdAudit',
     'Get-POStartupAudit', 'Get-PODriverInventory', 'Get-POScheduledTaskAudit', 'Get-POAppxInventory', 'Get-POInstalledGames', 'Add-POCustomGame', 'Get-POBenchmarkSnapshot',

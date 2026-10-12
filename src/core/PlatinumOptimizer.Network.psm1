@@ -368,6 +368,123 @@ function Invoke-PONetworkOptimization {
     return $results
 }
 
+function Get-PONetworkLatencyDiagnostic {
+    [CmdletBinding()]
+    param([ValidateRange(1, 20)][int]$Count = 4)
+    # Measures a REAL path: the IPv4 default gateway (first hop) when Windows
+    # reports one. This is a local-path measurement only. It is deliberately
+    # not labelled as a game-server ping, and no value is invented when no
+    # reachable target exists.
+    $result = [pscustomobject][ordered]@{
+        Target = $null
+        TargetKind = 'none'
+        ProbeCount = 0
+        Replies = 0
+        AverageMs = $null
+        MinimumMs = $null
+        MaximumMs = $null
+        LossPercent = $null
+        Measured = $false
+        Note = 'No probe was attempted.'
+        MeasuredAtUtc = [DateTime]::UtcNow.ToString('o')
+    }
+    if (-not (Test-POIsWindows)) { $result.Note = 'Latency diagnostics are available only on Windows.'; return $result }
+    if (-not (Get-Command Test-Connection -ErrorAction SilentlyContinue)) { $result.Note = 'Test-Connection is unavailable on this system.'; return $result }
+    $target = $null
+    $targetKind = 'none'
+    try {
+        if (Get-Command Get-NetRoute -ErrorAction SilentlyContinue) {
+            $routes = @(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
+                Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } |
+                Sort-Object -Property RouteMetric |
+                Select-Object -First 1)
+            if ($routes.Count -gt 0 -and $routes[0].NextHop) { $target = [string]$routes[0].NextHop; $targetKind = 'IPv4 default gateway (first hop)' }
+        }
+    }
+    catch { }
+    if ($null -eq $target -and (Get-Command Get-NetIPConfiguration -ErrorAction SilentlyContinue)) {
+        try {
+            foreach ($config in @(Get-NetIPConfiguration -ErrorAction Stop)) {
+                if ($null -ne $config.IPv4DefaultGateway -and $config.IPv4DefaultGateway.NextHop) {
+                    $target = [string]$config.IPv4DefaultGateway.NextHop
+                    $targetKind = 'IPv4 default gateway (first hop)'
+                    break
+                }
+            }
+        }
+        catch { }
+    }
+    if ($null -eq $target) {
+        $result.Note = 'No IPv4 default gateway is configured, so no local-path latency probe could be run. No latency value is reported.'
+        return $result
+    }
+    $result.Target = $target
+    $result.TargetKind = $targetKind
+    $result.ProbeCount = $Count
+    $latencies = @()
+    try {
+        # Count=1 per call keeps Windows PowerShell 5.1 behaviour consistent;
+        # the loop is bounded by $Count so this can never run away.
+        for ($i = 0; $i -lt $Count; $i++) {
+            $reply = @(Test-Connection -ComputerName $target -Count 1 -ErrorAction SilentlyContinue |
+                Where-Object { $null -ne $_.StatusCode -and [int]$_.StatusCode -eq 0 })
+            if ($reply.Count -gt 0) {
+                $value = if ($reply[0].PSObject.Properties['ResponseTime']) { [double]$reply[0].ResponseTime } else { $null }
+                if ($null -eq $value -and $reply[0].PSObject.Properties['Latency']) { $value = [double]$reply[0].Latency }
+                if ($null -ne $value) { $latencies += $value }
+            }
+        }
+    }
+    catch {
+        $result.Note = "The latency probe failed: $($_.Exception.Message)"
+        return $result
+    }
+    if ($latencies.Count -eq 0) {
+        $result.Note = "The gateway $target did not answer any of the $Count probe(s). No average latency is reported."
+        return $result
+    }
+    $result.Replies = $latencies.Count
+    $result.AverageMs = [math]::Round((($latencies | Measure-Object -Average).Average), 2)
+    $result.MinimumMs = [math]::Round((($latencies | Measure-Object -Minimum).Minimum), 2)
+    $result.MaximumMs = [math]::Round((($latencies | Measure-Object -Maximum).Maximum), 2)
+    $result.LossPercent = [math]::Round(((($Count - $latencies.Count) / [double]$Count) * 100), 1)
+    $result.Measured = $true
+    $result.Note = "Measured against $targetKind only. This is not a game-server ping and is not a performance-improvement claim."
+    return $result
+}
+
+function Get-PONetworkInterfaceDiagnostics {
+    [CmdletBinding()]
+    param()
+    # Read-only per-interface summary: IP addresses, DNS servers, default
+    # route and link speed. Nothing here is changed.
+    $rows = @()
+    if (-not (Test-POIsWindows)) { return $rows }
+    if (-not (Get-Command Get-NetIPConfiguration -ErrorAction SilentlyContinue)) { return $rows }
+    try {
+        foreach ($config in @(Get-NetIPConfiguration -ErrorAction Stop)) {
+            $ipv4 = @($config.IPv4Address | ForEach-Object { [string]$_.IPAddress })
+            $ipv6 = @($config.IPv6Address | ForEach-Object { [string]$_.IPAddress })
+            $dns = @()
+            try { $dns = @($config.DNSServer | ForEach-Object { [string]$_.ServerAddresses }) } catch { }
+            $gateway = $null
+            try { if ($null -ne $config.IPv4DefaultGateway -and $config.IPv4DefaultGateway.NextHop) { $gateway = [string]$config.IPv4DefaultGateway.NextHop } } catch { }
+            $rows += [pscustomobject][ordered]@{
+                InterfaceAlias = [string]$config.InterfaceAlias
+                InterfaceIndex = [int]$config.InterfaceIndex
+                IPv4Addresses = $ipv4
+                IPv6Addresses = $ipv6
+                DnsServers = $dns
+                DefaultGateway = $gateway
+                Changed = $false
+                Note = 'Read-only. DNS servers, IP addresses and routes are never changed automatically.'
+            }
+        }
+    }
+    catch { }
+    return $rows
+}
+
 function Restore-PONetworkTcpSection {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$BackupPath, [Parameter(Mandatory = $true)][psobject]$Manifest)
@@ -443,5 +560,6 @@ function Get-PONetworkReportNotes {
 Export-ModuleMember -Function @(
     'Invoke-PONetsh', 'ConvertFrom-PONetshTcpGlobalLines', 'Get-POTcpGlobalState',
     'Get-PONetworkOptimizationPlan', 'Get-PONetworkAdapterInventory', 'Invoke-PONetworkOptimization',
+    'Get-PONetworkLatencyDiagnostic', 'Get-PONetworkInterfaceDiagnostics',
     'Restore-PONetworkTcpSection', 'Restore-PONetworkAdapterPowerSection', 'Get-PONetworkReportNotes'
 )

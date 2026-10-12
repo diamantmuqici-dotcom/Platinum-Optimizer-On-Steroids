@@ -1,5 +1,12 @@
 # Known limitations and validation status
 
+> **v2.1.0 change.** The automatic engine now evaluates every category and
+> writes to the power plan, the gaming registry values and the justified TCP /
+> wired-adapter-power settings. The sections below were written for v2.0.1,
+> where only the power plan could change; where they still apply they describe
+> deliberate read-only decisions, not missing functionality. See
+> [`REGRESSION-AUDIT.md`](REGRESSION-AUDIT.md) for the root-cause analysis.
+
 ## Environment validation
 
 - This development checkout is running in a non-Windows workspace. Windows PowerShell 5.1, `powercfg.exe`, CIM/WMI Windows providers, UAC, System Restore, and Windows 10/11 hardware are not available here.
@@ -16,12 +23,21 @@
 
 ## Automatic-mode change boundary
 
-- The automatic run changes only settings in the `Platinum On Steroids` power scheme. It duplicates the currently active plan when needed, modifies documented processor minimum/maximum state and AC cooling policy where supported, and verifies the active GUID and setting values.
+- The automatic run evaluates twelve stages (BOOT, SCAN, BACKUP, CPU, POWER, GAMING, NETWORK, GPU, DISPLAY, AUDIO, MEMORY, VERIFY) and writes only where a change is justified and reversible:
+  - the `Platinum On Steroids` power scheme (documented processor minimum/maximum state and system cooling policy, verified by reading each value back);
+  - four documented HKCU gaming registry values through one uniform contract (detect → read → evaluate → explain → backup → apply → read back → record → roll back on failure → report);
+  - TCP receive-window autotuning only when it is **below** the documented Windows default, and RSS only when disabled on a multi-logical-processor system;
+  - wired Ethernet adapter "allow the computer to turn off this device" only when AC-powered;
+  - a DNS resolver-cache flush, which is transient and changes no configuration.
+- A plan with the correct name but unverified settings is explicitly reported as not proven configured, never as optimized.
+- Categories that remain deliberately read-only are listed below with their reasons. They are now genuinely inspected and reported per stage rather than skipped unseen.
 - Laptop battery mode applies a documented 85 percent maximum processor state; this can lower game performance on battery. It does not change battery sleep/display timers, USB behavior, PCIe behavior, processor boost, or core parking.
-- Core parking and boost settings are inspected but not forced. A universal parking/boost policy has no established benefit across all CPU topologies, games, firmware, and cooling designs.
-- Game Mode, capture, graphics scheduling, display refresh/colors, DNS/TCP/NIC settings, startup entries, services, processes, storage cleanup, and memory policy are assessed read-only. They remain unchanged to preserve user choice, security, connectivity, or workload-specific defaults.
-- No automatic network ping is run. Resolver choice alone cannot determine the route or latency to a game server.
+- Core parking and boost settings are inspected and explained but not forced. A universal parking/boost policy has no established benefit across all CPU topologies, games, firmware, and cooling designs.
+- Graphics scheduling (HAGS), display refresh rates, ICC/gamma/saturation, startup entries, scheduled tasks, Windows services, running processes, storage cleanup, pagefile and memory-management policy are assessed read-only. They remain unchanged to preserve user choice, security, connectivity, or workload-specific defaults.
+- The optimizer never disables Windows Update, Microsoft Defender, the firewall, UAC, or any security service, and never terminates processes or deletes files.
+- The network stage runs a **real** ICMP probe, but only to the IPv4 default gateway (the first hop). It is reported as a local-path measurement and explicitly not as a game-server ping. If no gateway is configured, no latency value is reported rather than invented.
 - The `--benchmark` mode captures a short operating-system counter sample, not a controlled game benchmark. No FPS/ping guarantee is made.
+- No FPS, frame-time, latency or ping improvement is claimed anywhere in the run, the log or the JSON report.
 
 ## Recovery and external system behavior
 
@@ -44,6 +60,8 @@
 8. Test laptop AC and battery detection, unknown chassis/power source, unsupported `powercfg` settings, and localized `powercfg` output. Confirm unknown or unsupported settings are skipped safely.
 9. Run `--restore` after the initial automatic run. Confirm the previous active plan is restored, only attempted existing-Platinum AC/DC sides still at the recorded target are restored, later conflicting values are left untouched, and unrelated plans remain unchanged.
 10. Test System Restore disabled/recently created/policy-blocked conditions and verify the application backup remains available.
-11. Verify network adapter and TCP snapshots are read-only. Confirm DNS, ECN, autotuning, offloads, RSS/RSC, firewall, Defender, Windows Update, services, startup entries, and active processes are unchanged.
-12. Check the timestamped human log and JSON report for accurate attempted/applied/already/skipped/failed/unverified counts and a truthful final status.
+11. Verify network adapter and TCP snapshots, DNS servers, IP addresses, routes, ECN, offloads, RSS/RSC, firewall, Defender, Windows Update, services, startup entries, and active processes are unchanged unless a justified change is reported.
+12. Check the timestamped human log and JSON report for accurate inspected/attempted/applied/already-optimized/diagnostic/skipped/failed/unverified/rolled-back counts and a truthful final status.
 13. Review Windows event logs and normal sleep/resume, audio, USB/controller, Wi-Fi/Ethernet, VPN, and gaming behavior after the apply/restore cycle.
+14. Confirm the twelve stage headers ([BOOT] … [VERIFY]) appear with live timestamps, that the console output mirrors `run.log`, and that the JSON report agrees with the on-screen counters.
+15. Confirm no "unapproved verbs" warning appears when the modules are imported.
