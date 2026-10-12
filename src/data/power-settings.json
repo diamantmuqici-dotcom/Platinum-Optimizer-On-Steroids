@@ -1,0 +1,248 @@
+{
+  "schemaVersion": 1,
+  "planName": "Platinum On Steroids",
+  "planDescription": "Platinum Optimizer gaming power plan. Responsive on AC power, thermally and battery aware on DC. Created and managed with powercfg; existing user plans are never deleted.",
+  "policy": "Only Microsoft-documented scheme/subgroup/setting GUIDs are used. Every setting write is verified with powercfg afterwards; settings the system does not expose are skipped as NOT_SUPPORTED instead of forced. Sleep is never silently disabled and no value is written that is not read back and confirmed.",
+  "builtinSchemes": {
+    "balanced": "381b4222-f694-41f0-9685-ff5bb260df2e",
+    "high-performance": "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
+    "power-saver": "a1841308-3541-4fab-bc81-f71556f20b4a",
+    "ultimate-performance": "e9a42b02-d5df-448d-aa00-03f14749eb61"
+  },
+  "duplicateBaseScheme": "high-performance",
+  "subgroups": {
+    "processor": "54533251-82be-4824-96c1-47b60b740d00",
+    "sleep": "238c9fa8-0aad-41ed-83f4-97be242c8f20",
+    "display": "7516b95f-f776-4464-8c53-06167f40cc99",
+    "pci-express": "501a4d13-42af-4429-9fd1-a8218c268e20",
+    "usb": "2a737441-1930-4402-8d77-b2bebba308a3"
+  },
+  "settings": [
+    {
+      "id": "processor-min-state",
+      "name": "Minimum processor state",
+      "subgroup": "processor",
+      "guid": "893dee8e-2bef-41e0-89c6-b55d0929964c",
+      "unit": "percent",
+      "min": 0,
+      "max": 100,
+      "notes": "Floor for the processor performance state. 100 forces maximum clock at all times (more heat and idle power); small values let Windows idle down."
+    },
+    {
+      "id": "processor-max-state",
+      "name": "Maximum processor state",
+      "subgroup": "processor",
+      "guid": "bc5038f7-23e0-4960-96da-33abaf5935ec",
+      "unit": "percent",
+      "min": 0,
+      "max": 100,
+      "notes": "Ceiling for the processor performance state. On many Intel systems a value below 100 also disables turbo boost, which trades peak speed for lower heat on battery."
+    },
+    {
+      "id": "system-cooling-policy",
+      "name": "System cooling policy",
+      "subgroup": "processor",
+      "guid": "94d3a615-a899-4ac5-ae2b-e4d8f634367f",
+      "unit": "enum",
+      "values": { "0": "Passive (throttle before fan)", "1": "Active (fan before throttle)" },
+      "notes": "Active cooling favors sustained clocks; passive favors quietness and may reduce clocks earlier."
+    },
+    {
+      "id": "processor-boost-policy",
+      "name": "Processor performance boost policy",
+      "subgroup": "processor",
+      "guid": "be337238-0d82-4146-a960-4f3749d470c7",
+      "unit": "percent",
+      "min": 0,
+      "max": 100,
+      "optional": true,
+      "notes": "Documented boost engagement level; reported as 'Processor performance boost mode' on some AMD systems. Not present on every platform, so it is applied only when the system exposes it."
+    },
+    {
+      "id": "core-parking-max-cores",
+      "name": "Processor performance core parking max cores",
+      "subgroup": "processor",
+      "guid": "ea062031-0e34-4ff1-9b6d-eb1059334028",
+      "dcGuid": "ea062031-0e34-4ff1-9b6d-eb1059334029",
+      "unit": "percent",
+      "min": 1,
+      "max": 100,
+      "optional": true,
+      "notes": "Upper bound on cores the scheduler may use. Documented core-parking setting; hidden or absent on systems where Windows manages parking internally."
+    },
+    {
+      "id": "core-parking-min-cores",
+      "name": "Processor performance core parking min cores",
+      "subgroup": "processor",
+      "guid": "0cc5b647-c1df-4637-891a-dec35c318583",
+      "dcGuid": "0cc5b647-c1df-4637-891a-dec35c318584",
+      "unit": "percent",
+      "min": 1,
+      "max": 100,
+      "optional": true,
+      "notes": "Lower bound on unparked cores. 100 keeps every core unparked (responsive, higher idle power). Lower values let Windows park cores at idle."
+    },
+    {
+      "id": "core-parking-utility-distribution",
+      "name": "Processor performance core parking utility distribution",
+      "subgroup": "processor",
+      "guid": "4bdaf4e9-d103-46d7-a5f0-6280121616ef",
+      "unit": "enum",
+      "values": { "0": "Disabled", "1": "Enabled" },
+      "optional": true,
+      "notes": "Distributes work across cores to avoid concentrating heat; document setting, skipped when the platform does not expose it."
+    },
+    {
+      "id": "pci-express-aspm",
+      "name": "PCI Express Link State Power Management",
+      "subgroup": "pci-express",
+      "guid": "ee12f906-d277-404b-b6da-e5fa1a576df5",
+      "unit": "enum",
+      "values": { "0": "Off", "1": "Moderate power savings", "2": "Maximum power savings" },
+      "notes": "Off avoids link-power-state transitions on AC gaming; moderate on battery keeps power draw reasonable."
+    },
+    {
+      "id": "usb-selective-suspend",
+      "name": "USB selective suspend setting",
+      "subgroup": "usb",
+      "guid": "48e6b7a6-50f5-4782-a5d4-53bb8f07e226",
+      "unit": "enum",
+      "values": { "0": "Disabled", "1": "Enabled" },
+      "notes": "Disabled on AC keeps USB headsets/controllers from being suspended; kept enabled on battery to preserve runtime."
+    },
+    {
+      "id": "sleep-after",
+      "name": "Sleep after",
+      "subgroup": "sleep",
+      "guid": "29f6c1db-86da-48c5-9fdb-f2b67b1f44da",
+      "unit": "seconds",
+      "min": 0,
+      "max": 86400,
+      "notes": "Idle timeout before normal system sleep. The Platinum plan keeps normal sleep functional instead of disabling it."
+    },
+    {
+      "id": "display-off-after",
+      "name": "Turn off display after",
+      "subgroup": "display",
+      "guid": "3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e",
+      "unit": "seconds",
+      "min": 0,
+      "max": 86400,
+      "notes": "Idle timeout before the display powers down."
+    }
+  ],
+  "presets": [
+    {
+      "id": "gaming",
+      "name": "Platinum On Steroids — Gaming",
+      "description": "Primary gaming preset. Responsive on AC with full headroom and all cores available; on battery it caps the processor ceiling to reduce turbo heat and preserves runtime. Sleep stays functional.",
+      "risk": "LOW",
+      "requiresThermalConfirmation": false,
+      "ac": {
+        "processor-min-state": 5,
+        "processor-max-state": 100,
+        "system-cooling-policy": 1,
+        "processor-boost-policy": 100,
+        "core-parking-max-cores": 100,
+        "core-parking-utility-distribution": 1,
+        "pci-express-aspm": 0,
+        "usb-selective-suspend": 0,
+        "sleep-after": 3600,
+        "display-off-after": 900
+      },
+      "dc": {
+        "processor-min-state": 5,
+        "processor-max-state": 95,
+        "system-cooling-policy": 1,
+        "pci-express-aspm": 1,
+        "usb-selective-suspend": 1,
+        "sleep-after": 1200,
+        "display-off-after": 600
+      }
+    },
+    {
+      "id": "competitive",
+      "name": "Platinum On Steroids — Competitive",
+      "description": "Responsiveness-focused preset for desktop or plugged-in play: minimum processor state 100 percent on AC keeps clocks pinned, and every core is kept unparked. This raises idle power draw, heat, and fan noise; it is not applied on battery.",
+      "risk": "MODERATE",
+      "requiresThermalConfirmation": true,
+      "ac": {
+        "processor-min-state": 100,
+        "processor-max-state": 100,
+        "system-cooling-policy": 1,
+        "processor-boost-policy": 100,
+        "core-parking-min-cores": 100,
+        "core-parking-max-cores": 100,
+        "core-parking-utility-distribution": 1,
+        "pci-express-aspm": 0,
+        "usb-selective-suspend": 0,
+        "sleep-after": 3600,
+        "display-off-after": 900
+      },
+      "dc": {
+        "processor-min-state": 5,
+        "processor-max-state": 95,
+        "system-cooling-policy": 1,
+        "pci-express-aspm": 1,
+        "usb-selective-suspend": 1,
+        "sleep-after": 1200,
+        "display-off-after": 600
+      }
+    },
+    {
+      "id": "balanced",
+      "name": "Platinum On Steroids — Balanced",
+      "description": "Practical everyday preset: normal idle behavior with full headroom when load rises. Modest AC/DC values, ASPM and USB suspend left at power-sensible states.",
+      "risk": "LOW",
+      "requiresThermalConfirmation": false,
+      "ac": {
+        "processor-min-state": 5,
+        "processor-max-state": 100,
+        "system-cooling-policy": 1,
+        "pci-express-aspm": 1,
+        "usb-selective-suspend": 1,
+        "sleep-after": 1800,
+        "display-off-after": 600
+      },
+      "dc": {
+        "processor-min-state": 5,
+        "processor-max-state": 90,
+        "system-cooling-policy": 0,
+        "pci-express-aspm": 1,
+        "usb-selective-suspend": 1,
+        "sleep-after": 900,
+        "display-off-after": 300
+      }
+    },
+    {
+      "id": "laptop",
+      "name": "Platinum On Steroids — Laptop",
+      "description": "Adaptive preset for portable systems: full performance on AC, a conservative ceiling and passive cooling on battery so the device is never forced into a high-power state while unplugged.",
+      "risk": "LOW",
+      "requiresThermalConfirmation": false,
+      "ac": {
+        "processor-min-state": 5,
+        "processor-max-state": 100,
+        "system-cooling-policy": 1,
+        "pci-express-aspm": 1,
+        "usb-selective-suspend": 0,
+        "sleep-after": 1800,
+        "display-off-after": 600
+      },
+      "dc": {
+        "processor-min-state": 5,
+        "processor-max-state": 85,
+        "system-cooling-policy": 0,
+        "pci-express-aspm": 1,
+        "usb-selective-suspend": 1,
+        "sleep-after": 900,
+        "display-off-after": 300
+      }
+    }
+  ],
+  "restorePreset": {
+    "id": "restore-previous",
+    "name": "Restore Previous Power Plan",
+    "description": "Reactivates the plan that was active before Platinum On Steroids was activated. The Platinum plan itself is kept so it can be re-selected; no user plan is ever deleted automatically."
+  }
+}

@@ -26,6 +26,13 @@
 - Restore can only undo operations recorded by Platinum Optimizer. It cannot recover unrecorded user changes, removed data from the archived V9.3 script, or a whole Windows installation.
 - Backup ZIP exports are not encrypted. Local DNS/service/system metadata may be sensitive.
 
+## Module limits introduced in 1.1
+
+- **Power plan:** the Platinum On Steroids plan is created from the High Performance scheme with `powercfg /duplicatescheme`. Platforms where `powercfg` is policy-restricted may reject plan creation; the workflow then reports the failure and leaves the previous plan active. Boost policy and core-parking settings exist only where the processor platform exposes them; they are skipped (never forced) elsewhere, which means on some AMD/Intel generations core parking remains under Windows' internal control. The plan's effect on actual frame pacing is not measured by this application.
+- **Audio:** Windows exposes no documented PowerShell interface for default endpoint selection, per-endpoint sample rate, enhancement toggles, exclusive-mode flags, or spatial-audio state, so those fields are reported as Unknown with a pointer to the supported UI. The module therefore changes exactly one fully verifiable value (communications ducking). It does not measure or claim audio latency improvements. Bluetooth codec negotiation and headset-suite virtualizers are outside every documented interface and remain manual.
+- **Display:** gamma ramps set via `SetDeviceGammaRamp` are session-scoped; some drivers reset them on mode switches, HDR enablement, or fast startup, and under HDR they are typically ignored — the module detects read-back mismatches and reports failure rather than claiming success. HDR state itself is not exposed by the APIs used, so the HDR Gaming profile is guidance-only. DDC/CI is probed read-only (capabilities string length) and a negative result can mean a disabled monitor setting rather than absent hardware. Monitor OSD controls (hardware brightness/contrast/color temperature) are never adjusted. Vendor saturation/vibrance is manual-only because no documented write API exists; any manual vendor change must also be reverted manually.
+- **Single-file release:** `PlatinumOptimizer.bat` expands embedded sources into `%LOCALAPPDATA%\PlatinumOptimizer\runtime\<build-id>` on first run per build; deleting that folder is the documented recovery for a corrupted expansion. An administrator-elevated restart launched from the extracted runtime runs the extracted engine directly (documented behavior, not a bug).
+
 ## Manual Windows release checklist
 
 1. Run the PowerShell test harness in a standard user session and elevated session.
@@ -38,3 +45,7 @@
 8. Check high-performance plans are blocked on battery, unknown power source, and unknown form factor; maximum mode requires the separate warning confirmation.
 9. Confirm no background sampling unless monitoring is enabled and no automatic reboot occurs.
 10. Review Windows Event Viewer, Defender, Windows Update, Store, Bluetooth, audio, USB/controller, VPN, and sleep/resume behavior after the change/restore cycle.
+11. Platinum On Steroids: create the plan, verify no duplicate is created on a second run, apply each preset, verify skipped settings are reported on machines without core parking/boost exposure, activate, confirm the active GUID, restore the previous plan, and re-activate. Verify existing user plans survive the whole cycle.
+12. Audio: apply a preset, verify the ducking value round-trips, restore original audio settings, and confirm the microphone and default devices are untouched. Test with a USB headset, a Bluetooth headset, and a disconnected-device state.
+13. Display: on a single- and multi-monitor system, apply a gamma profile to one display and confirm the other display is untouched; verify restore returns the captured mode/ramp; test refresh change on a high-refresh panel and on a 60 Hz panel (no-op); test with HDR enabled (expect an honest failure for gamma).
+14. Run `PlatinumOptimizer.bat` from a clean profile: verify expansion, UI launch, `-Scan`, `-SelfTest`, and re-run reuse of the runtime directory.

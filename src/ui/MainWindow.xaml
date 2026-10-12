@@ -119,6 +119,9 @@
           <StackPanel x:Name="Navigation">
             <Button x:Name="NavHome" Content="◈   Home" Tag="Home" HorizontalContentAlignment="Left" Background="#253344" />
             <Button x:Name="NavOptimize" Content="✦   Optimize" Tag="Optimize" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavPower" Content="⚡   Power plan" Tag="Power" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavAudio" Content="♪   Audio &amp; headphones" Tag="Audio" HorizontalContentAlignment="Left" />
+            <Button x:Name="NavDisplay" Content="▤   Display &amp; colors" Tag="Display" HorizontalContentAlignment="Left" />
             <Button x:Name="NavProfiles" Content="▤   Profiles" Tag="Profiles" HorizontalContentAlignment="Left" />
             <Button x:Name="NavTweaks" Content="☷   Tweak catalog" Tag="Tweaks" HorizontalContentAlignment="Left" />
             <Button x:Name="NavGames" Content="⌂   Game library" Tag="Games" HorizontalContentAlignment="Left" />
@@ -165,7 +168,7 @@
                   <TextBlock x:Name="ScoreText" Text="Gaming score: NOT SCORED — no in-game benchmark captured" Foreground="#E4B56E" FontSize="11" FontWeight="SemiBold" Margin="0,13,0,0" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
-                  <Button x:Name="OptimizeNowButton" Content="Review recommended profile  →" Style="{StaticResource PrimaryButton}" Margin="0,0,0,8" />
+                  <Button x:Name="OptimizeNowButton" Content="OPTIMIZE MY PC — PLATINUM ON STEROIDS" Style="{StaticResource PrimaryButton}" Margin="0,0,0,8" />
                   <Button x:Name="BaselineButton" Content="Capture idle baseline" HorizontalAlignment="Right" />
                 </StackPanel>
               </Grid>
@@ -190,7 +193,8 @@
 
           <StackPanel x:Name="OptimizePanel" Visibility="Collapsed">
             <TextBlock Text="Preview first. Apply only the action you understand." FontSize="16" FontWeight="SemiBold" Margin="0,0,0,5" />
-            <TextBlock Text="Profiles never mass-apply tweaks. They can only select an already-installed Windows power plan after compatibility checks." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,0,0,18" />
+            <TextBlock Text="OPTIMIZE MY PC — PLATINUM ON STEROIDS runs the combined workflow: detect hardware, displays, audio, power, network, and input; capture a baseline; back up; apply only low-risk, reversible changes (the Platinum On Steroids power plan with your confirmation, the supported TCP baseline); verify each step; and report what was skipped. Audio presets, display color profiles, and DNS changes stay behind their own explicit consent." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,0,0,10" />
+            <TextBlock Text="The profile preview below remains available for selecting an existing built-in Windows plan without creating anything." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,0,0,18" />
             <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
               <StackPanel>
                 <TextBlock Text="PROFILE" FontSize="10" FontWeight="Bold" Foreground="#8796A8" />
@@ -216,6 +220,86 @@
                 </Border>
                 <StackPanel Orientation="Horizontal" Margin="0,14,0,0"><CheckBox x:Name="SimulationModeCheck" Content="Simulation mode (default)" IsChecked="True"/><Button x:Name="ApplyProfileButton" Content="Apply reviewed profile" Style="{StaticResource PrimaryButton}" IsEnabled="False"/><Button x:Name="CancelProfileButton" Content="Cancel / clear preview"/></StackPanel>
                 <TextBlock x:Name="ApplyStatusText" Text="Simulation mode does not create a backup or write settings." FontSize="11" Foreground="#91A0B1" Margin="0,8,0,0" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel x:Name="PowerPanel" Visibility="Collapsed">
+            <TextBlock Text="Platinum On Steroids — dedicated power plan" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Created and managed with powercfg from the documented High Performance scheme. Existing plans are preserved and never deleted automatically. Every setting write is read back and verified; settings Windows does not expose are skipped, not forced. Sleep stays functional." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,12" />
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="16">
+              <StackPanel>
+                <TextBlock Text="PLAN STATE" FontSize="10" FontWeight="Bold" Foreground="#8796A8" />
+                <TextBlock x:Name="PlatinumPlanStatusText" Text="Not inspected yet. Use Refresh." TextWrapping="Wrap" Foreground="#B7C2CF" Margin="0,8,0,10" />
+                <TextBlock Text="CPU / CORE PARKING (READ FROM ACTIVE PLAN)" FontSize="10" FontWeight="Bold" Foreground="#8796A8" />
+                <TextBlock x:Name="CpuParkingText" Text="Not inspected yet." TextWrapping="Wrap" Foreground="#B7C2CF" Margin="0,8,0,10" />
+                <TextBlock Text="PRESET  ·  one plan, validated presets inside the app" FontSize="10" FontWeight="Bold" Foreground="#8796A8" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,10">
+                  <ComboBox x:Name="PlatinumPresetCombo" Width="340" />
+                  <Button x:Name="ApplyPlatinumPresetButton" Content="Preview &amp; apply preset" Style="{StaticResource PrimaryButton}" />
+                  <Button x:Name="ActivatePlatinumButton" Content="Activate now" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                  <Button x:Name="RefreshPowerButton" Content="Refresh power state" />
+                  <Button x:Name="CreatePlatinumPlanButton" Content="Create / validate plan" />
+                  <Button x:Name="RestorePowerPlanButton" Content="Restore previous plan" />
+                  <Button x:Name="OpenPowerSettingsButton" Content="Windows power settings" />
+                </StackPanel>
+                <TextBlock x:Name="PowerApplyStatusText" Text="No change applied. Creating or activating asks for confirmation first; failures never report success." FontSize="11" Foreground="#91A0B1" Margin="0,10,0,0" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+            <Border Background="#1B1A17" BorderBrush="#665236" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,14,0,0">
+              <StackPanel>
+                <TextBlock Text="QUICK CPU &amp; MAXIMUM GAMING PERFORMANCE" Foreground="#E4B56E" FontWeight="Bold" />
+                <TextBlock x:Name="QuickCpuText" Text="Quick CPU detection runs on Refresh. It is never bundled or launched by this app." TextWrapping="Wrap" Foreground="#D1C5B0" Margin="0,7,0,0" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel x:Name="AudioPanel" Visibility="Collapsed">
+            <TextBlock Text="Audio &amp; headphones — optional, reversible, independent" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Audio profiles are separate from the gaming optimization workflow. Only a fully readable and restorable Windows value (communications ducking) is changed automatically; every other step is verified detection plus manual instructions in supported Windows UI. No codec, driver, or third-party audio software is installed. Audio latency is never claimed to improve." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,12" />
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="16">
+              <StackPanel>
+                <TextBlock Text="DETECTED AUDIO (WINDOWS-REPORTED ONLY)" FontSize="10" FontWeight="Bold" Foreground="#8796A8" />
+                <TextBox x:Name="AudioInventoryText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="190" Margin="0,8,0,10" />
+                <StackPanel Orientation="Horizontal"><Button x:Name="RefreshAudioButton" Content="Refresh audio inventory" /><Button x:Name="OpenSoundSettingsButton" Content="Windows Sound settings" /><Button x:Name="OpenMmsysButton" Content="Sound Control Panel" /></StackPanel>
+                <TextBlock Text="AUDIO PRESET" FontSize="10" FontWeight="Bold" Foreground="#8796A8" Margin="0,14,0,0" />
+                <TextBlock x:Name="AudioPresetExplanation" Text="Select a preset to read exactly what it changes and why." TextWrapping="Wrap" Foreground="#B7C2CF" Margin="0,6,0,8" />
+                <StackPanel Orientation="Horizontal">
+                  <ComboBox x:Name="AudioPresetCombo" Width="300" />
+                  <Button x:Name="ApplyAudioPresetButton" Content="Preview &amp; apply preset" Style="{StaticResource PrimaryButton}" />
+                  <Button x:Name="RestoreAudioButton" Content="Restore original audio settings" />
+                </StackPanel>
+                <TextBlock x:Name="AudioApplyStatusText" Text="No audio change applied. The microphone and default devices are never touched." FontSize="11" Foreground="#91A0B1" Margin="0,10,0,0" TextWrapping="Wrap" />
+                <TextBlock x:Name="AudioManualStepsText" Text="" TextWrapping="Wrap" Foreground="#D9C49C" Margin="0,8,0,0" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel x:Name="DisplayPanel" Visibility="Collapsed">
+            <TextBlock Text="Display &amp; colors — bounded, per-display, non-accumulating" FontSize="16" FontWeight="SemiBold" />
+            <TextBlock Text="Only documented Win32 interfaces are used. Gamma ramps are applied absolutely from a captured original with an identical curve on all three channels, so profiles cannot accumulate into green or oversaturated output. GPU saturation/vibrance has no documented write API here and stays manual. Nothing is applied to a display you did not select." Foreground="#92A0B1" TextWrapping="Wrap" Margin="0,5,0,12" />
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="16">
+              <StackPanel>
+                <TextBlock Text="DETECTED DISPLAYS" FontSize="10" FontWeight="Bold" Foreground="#8796A8" />
+                <TextBox x:Name="DisplayInventoryText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="210" Margin="0,8,0,10" />
+                <StackPanel Orientation="Horizontal"><Button x:Name="RefreshDisplaysButton" Content="Refresh displays" /><Button x:Name="OpenDisplaySettingsButton" Content="Windows display settings" /><Button x:Name="OpenColorManagementButton" Content="Color Management" /></StackPanel>
+                <TextBlock Text="DISPLAY PROFILE  ·  target display + profile" FontSize="10" FontWeight="Bold" Foreground="#8796A8" Margin="0,14,0,0" />
+                <TextBlock x:Name="DisplayProfileExplanation" Text="Select a display and a profile to read its purpose, scope, and trade-offs." TextWrapping="Wrap" Foreground="#B7C2CF" Margin="0,6,0,8" />
+                <StackPanel Orientation="Horizontal">
+                  <ComboBox x:Name="DisplayCombo" Width="240" />
+                  <ComboBox x:Name="DisplayProfileCombo" Width="280" />
+                  <Button x:Name="ApplyDisplayProfileButton" Content="Preview &amp; apply profile" Style="{StaticResource PrimaryButton}" />
+                  <Button x:Name="RestoreDisplayButton" Content="Restore display" />
+                </StackPanel>
+                <TextBlock x:Name="DisplayApplyStatusText" Text="No display change applied. HDR and vendor saturation remain under their supported UIs." FontSize="11" Foreground="#91A0B1" Margin="0,10,0,0" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+            <Border Background="#1B1A17" BorderBrush="#665236" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,14,0,0">
+              <StackPanel>
+                <TextBlock Text="COLOR SAFETY RULES (ENFORCED BY DESIGN)" Foreground="#E4B56E" FontWeight="Bold" />
+                <TextBlock Text="No maximum saturation by default · no unverified GPU registry writes · gamma clamped 0.85–1.15 · identical curve on R/G/B channels · original captured before the first change · per-display targeting · restore always available. Global ramp changes affect the desktop, not a single game — game-specific notes are shown per profile." TextWrapping="Wrap" Foreground="#D1C5B0" Margin="0,7,0,0" />
               </StackPanel>
             </Border>
           </StackPanel>
@@ -335,7 +419,7 @@
         </Grid>
       </ScrollViewer>
       <Border Grid.Row="2" Background="#0D131C" BorderBrush="#202A36" BorderThickness="0,1,0,0">
-        <Grid Margin="30,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="FooterStatusText" Text="Ready · local diagnostics only" Foreground="#718195" FontSize="10" VerticalAlignment="Center"/><TextBlock Text="PLATINUM OPTIMIZER  /  1.0.0" Foreground="#718195" FontSize="10" VerticalAlignment="Center" Grid.Column="1"/></Grid>
+        <Grid Margin="30,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="FooterStatusText" Text="Ready · local diagnostics only" Foreground="#718195" FontSize="10" VerticalAlignment="Center"/><TextBlock Text="PLATINUM OPTIMIZER  /  1.1.0" Foreground="#718195" FontSize="10" VerticalAlignment="Center" Grid.Column="1"/></Grid>
       </Border>
     </Grid>
   </Grid>
