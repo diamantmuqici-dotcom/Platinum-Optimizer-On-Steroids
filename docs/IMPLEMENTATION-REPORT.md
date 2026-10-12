@@ -1,5 +1,12 @@
 # Implementation report — Platinum On Steroids expansion (v1.1.0)
 
+> **Historical document (v1.x WPF application).** The graphical interface
+> described here was removed in v2.0; see
+> [`IMPLEMENTATION-REPORT-V2.md`](IMPLEMENTATION-REPORT-V2.md) for the
+> current CMD-only automatic engine. The power-plan, audio, and display
+> module internals documented below are still in use (audio/display
+> primarily for restoring v1.x backups and read-only assessment).
+
 Date: 2026-10-12 · Branch: `arena/8e6acf82-platinum-optimizer-on-steroids` · Base: `ce99daba`
 
 This report states exactly what was implemented, how it was verified in this
