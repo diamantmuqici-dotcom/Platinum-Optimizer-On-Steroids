@@ -135,3 +135,10 @@ The Windows-specific `powercfg`, registry, UAC, System Restore, network-adapter,
 ## Legacy safety audit
 
 The original V9.3 command file is preserved as `legacy/Platinum+Optimizer.V9.3.FREE.cmd.disabled.txt` for audit only. See [`docs/legacy-v9.3-audit.md`](docs/legacy-v9.3-audit.md) and [`docs/legacy-v9.3-tweak-inventory.csv`](docs/legacy-v9.3-tweak-inventory.csv). The compatibility launcher does not execute it.
+
+## Companion toolbox
+
+The repository also includes the **Platinum+ Toolbox V1.1** interactive menu
+(`Platinum+Toolbox.V1.1.cmd`), a companion script with 42 options for
+re-enabling services, repairing gaming dependencies, and installing
+libraries/browsers. Run it as administrator and select an option.
